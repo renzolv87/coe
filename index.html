@@ -198,6 +198,17 @@
   .pillar-split-label { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#7d8aa3;
     margin:14px 0 6px; text-align:center; }
   .pbadge b { font-weight:800; }
+
+  /* Team-wide pillar coverage banner (groups view) */
+  .coverage { max-width:760px; margin:0 auto 18px; border-radius:16px; padding:14px 16px; text-align:center;
+    border:1px solid rgba(255,255,255,.12); background:#141a2e; }
+  .coverage.cov-ok { border-color:rgba(50,185,175,.45); background:rgba(50,185,175,.09); }
+  .coverage.cov-warn { border-color:rgba(245,165,36,.55); background:rgba(245,165,36,.11); }
+  .cov-head { font-size:13px; font-weight:800; margin-bottom:10px; letter-spacing:.3px; }
+  .cov-badges { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .cov-badge { font-size:11px; padding:4px 11px; border-radius:20px; border:1px solid rgba(255,255,255,.14);
+    color:#7d8aa3; white-space:nowrap; }
+  .cov-badge b { font-weight:800; }
 </style>
 </head>
 <body>
@@ -241,7 +252,7 @@ var TZ = { Germany:1, Spain:1, India:5.5, Hungary:1, Austria:1, Brazil:-3, Mexic
 /* The 3 pillars – the heart of the CoE */
 var PILLARS = [
   { emoji:"\u{1F9E9}", name:"Data Gathering, Test & Reuse", tag:"Data \u00B7 Test \u00B7 Reuse", color:"#E20074",
-    sub:"Detective mode on \u{1F50D} \u2013 discover, collect, then test what works and reuse the gold. Why build the same thing twice?" },
+    sub:"Detective mode \u{1F50D} \u2013 and it\u2019s technical too: discover, collect, then actually test it in the real world to prove it truly works before we reuse the gold. No \u201Cworks on paper\u201D allowed." },
   { emoji:"\u{1F6E0}\uFE0F", name:"Hands-on: Create & Develop", tag:"Build \u00B7 Create \u00B7 Dev", color:"#32B9AF",
     sub:"Sleeves up, keyboard hot \u{1F525} \u2013 give me a use case and I\u2019ll build it. Less talking, more committing." },
   { emoji:"\u{1F4D0}", name:"Design, Architecture, Doc & Standards", tag:"Design \u00B7 Arch \u00B7 Docs", color:"#f5a524",
@@ -256,21 +267,21 @@ var QUIZ = [
   { q:"Production is down at 3AM. Your move?",
     a:{ l:"It works on my machine", e:"\u{1F937}", d:"Technically\u2026 not my problem", p:"1461749280684-dccba630e2f6", g:"linear-gradient(135deg,#0f2027,#203a43)" },
     b:{ l:"Have you tried rebooting?", e:"\u{1F50C}", d:"The ancient sacred ritual", p:"1558494949-ef010cbdcc31", g:"linear-gradient(135deg,#232526,#414345)" } },
-  { q:"Be honest\u2026 which meme IS your dev life? \u{1F602}", meme:true,
-    a:{ l:"Distracted Boyfriend", e:"\u{1F440}", d:"Me eyeing the shiny new framework while my stable stack sobs quietly", img:"https://i.imgflip.com/1ur9b0.jpg", g:"linear-gradient(135deg,#2b5876,#4e4376)" },
-    b:{ l:"Two Buttons", e:"\u{1F605}", d:"\u201CFix the bug\u201D or \u201Crewrite everything\u201D \u2013 sweating intensifies", img:"https://i.imgflip.com/1g8my4.jpg", g:"linear-gradient(135deg,#c31432,#240b36)" } },
+  { q:"Which one IS your dev life? \u{1F602}", meme:true,
+    a:{ l:"sudo make me a sandwich", e:"\u{1F96A}", d:"The one command that ends every argument \u00B7 xkcd #149", img:"https://imgs.xkcd.com/comics/sandwich.png", g:"linear-gradient(135deg,#0f2027,#203a43)" },
+    b:{ l:"\u201CMy code\u2019s compiling\u201D", e:"\u23F3", d:"The only sanctioned excuse to leave your desk \u00B7 xkcd #303", img:"https://imgs.xkcd.com/comics/compiling.png", g:"linear-gradient(135deg,#232526,#414345)" } },
   { q:"That meeting today\u2026",
     a:{ l:"Could\u2019ve been an email", e:"\u{1F4E7}", d:"Three bullet points, tops", p:"1498050108023-c5249f4df085", g:"linear-gradient(135deg,#3a7bd5,#3a6073)" },
     b:{ l:"I actually love meetings", e:"\u{1F5E3}\uFE0F", d:"Send more calendar invites", p:"1517245386807-bb43f82c33c4", g:"linear-gradient(135deg,#654ea3,#eaafc8)" } },
   { q:"That Jira ticket open since forever:",
     a:{ l:"Close as won\u2019t-fix", e:"\u2705", d:"Bold. Ruthless. Iconic.", p:"1499750310107-5fef28a66643", g:"linear-gradient(135deg,#11998e,#38ef7d)" },
     b:{ l:"Reopen it forever", e:"\u267B\uFE0F", d:"See you next sprint. And the next.", p:"1526374965328-7f61d4dc18c5", g:"linear-gradient(135deg,#c31432,#240b36)" } },
-  { q:"Binge-watch of choice:",
-    a:{ l:"Silicon Valley", e:"\u{1F4BB}", d:"Too real to be just comedy", p:"1522869635100-9f4c5e86aa37", g:"linear-gradient(135deg,#1d976c,#93f9b9)" },
-    b:{ l:"Mr. Robot", e:"\u{1F3AD}", d:"Hoodie on, trust no one", p:"1550751827-4bd374c3f58b", g:"linear-gradient(135deg,#200122,#6f0000)" } },
-  { q:"Pick a side:",
-    a:{ l:"Football", e:"\u26BD", d:"The beautiful game", p:"1431324155629-1a6deb1dec8d", g:"linear-gradient(135deg,#00b09b,#96c93d)" },
-    b:{ l:"Basketball", e:"\u{1F3C0}", d:"Nothing but net", p:"1546519638-68e109498ffc", g:"linear-gradient(135deg,#ee0979,#ff6a00)" } },
+  { q:"Pick your IT binge \u2013 which box set wins? \u{1F37F}",
+    a:{ l:"Silicon Valley", e:"\u{1F4BB}", d:"Startups, stand-ups and cringe demos \u2013 too real to be just comedy", img:"https://image.tmdb.org/t/p/w500/zWSLDF5Cd7XvHhK5tUmpKr7C63p.jpg", g:"linear-gradient(135deg,#1d976c,#0b3d2e)" },
+    b:{ l:"Mr. Robot", e:"\u{1F3AD}", d:"Hoodie on, trust no one, root everything", img:"https://image.tmdb.org/t/p/w500/oKIBhzZzDX07SwE2So3Ck1CY9tM.jpg", g:"linear-gradient(135deg,#200122,#6f0000)" } },
+  { q:"Grand final night \u2013 which one are you glued to? \u{1F3DF}\uFE0F",
+    a:{ l:"FIFA World Cup", e:"\u26BD", d:"Messi & Mbapp\u00E9, a whole planet holding its breath for the winner", p:"1489944440615-453fc2b6a9a9", g:"linear-gradient(135deg,#0b8457,#f5c518)" },
+    b:{ l:"NBA Finals", e:"\u{1F3C0}", d:"LeBron & Curry, a buzzer-beater poster dunk", p:"1519861531473-9200262188bf", g:"linear-gradient(135deg,#e94e1b,#141414)" } },
   { q:"Your 90-second intro today\u2026",
     a:{ l:"Nailed the time", e:"\u23F1\uFE0F", d:"Respected the timer like a pro", p:"1501139083538-0139583c060f", g:"linear-gradient(135deg,#11998e,#38ef7d)" },
     b:{ l:"Went way over", e:"\u{1F605}", d:"Still talking at minute four", p:"1495364141860-b0d03eccd001", g:"linear-gradient(135deg,#f7971e,#ffd200)" } },
@@ -466,7 +477,7 @@ function computeGroups(){
       groups[gi].forEach(function(m){
         sc += useAffinity ? pairScore(person,m) : Math.max(0, overlapHours(person,m));
       });
-      if(useAffinity && sharedState.quiz[person] && !pillarInGroup(groups[gi], sharedState.quiz[person].pillar)) sc += 1.5;
+      if(useAffinity && sharedState.quiz[person] && !pillarInGroup(groups[gi], sharedState.quiz[person].pillar)) sc += 8; // strongly favour covering every pillar
       if(!useAffinity) sc += Math.random()*3;         // absentees: random among compatible squads
       if(!compatible) sc -= 1000;                      // last-resort penalty (only if unavoidable)
       if(sc > bestScore){ bestScore=sc; best=gi; }
@@ -492,6 +503,11 @@ function computeGroups(){
 
   /* Repair + optimise: remove any residual timezone clash first, then improve affinity.
      Pairs that involve an absentee only score on overlap, so they stay grouped purely by timezone. */
+  function distinctPillars(gr){
+    var seen={};
+    gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q && typeof q.pillar==="number") seen[q.pillar]=true; });
+    return Object.keys(seen).length;
+  }
   function cost(){
     var hard=0, soft=0;
     groups.forEach(function(gr){
@@ -499,6 +515,7 @@ function computeGroups(){
         if(!tzCompatible(gr[i],gr[j])) hard++;
         soft += pairScore(gr[i],gr[j]);
       } }
+      soft += 25 * distinctPillars(gr);   // strongly reward at least one owner per pillar
     });
     return { hard:hard, soft:soft };
   }
@@ -738,7 +755,9 @@ function renderQuiz(){
                 '<span class="p-head"><span class="q-emoji">'+p.emoji+'</span>'+p.name+'</span>'+
                 '<span class="p-sub">'+p.sub+'</span></button>';
       });
-      html += '</div></div>';
+      html += '</div>';
+      html += '<div class="pillar-hint">\u{1F91D} Pick honestly \u2013 every squad needs at least one person per pillar, so your choice shapes the teams.</div>';
+      html += '</div>';
     }
     var pct = Math.round(myQuiz.idx/totalSteps*100);
     html += '<div class="q-progress"><div style="width:'+pct+'%"></div></div>';
@@ -781,6 +800,23 @@ function renderGroups(){
   var names = ["Squad 1","Squad 2","Squad 3"];
 
   html += '<div class="section-label">\u{1F91D} Your squads for the mission</div>';
+
+  /* Team-wide pillar coverage \u2013 make sure every chosen pillar has at least one owner */
+  var teamPillars = [0,0,0];
+  groups.forEach(function(gr){ gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q && typeof q.pillar==="number") teamPillars[q.pillar]++; }); });
+  var allCovered = teamPillars.every(function(c){ return c>0; });
+  html += '<div class="coverage '+(allCovered?'cov-ok':'cov-warn')+'">';
+  html += '<div class="cov-head">'+(allCovered
+      ? '\u2705 Pillar coverage \u00B7 every pillar has at least one owner on the team'
+      : '\u26A0\uFE0F Pillar coverage \u00B7 make sure every pillar has at least one owner')+'</div>';
+  html += '<div class="cov-badges">';
+  PILLARS.forEach(function(p,i){
+    var c = teamPillars[i], ok = c>0;
+    html += '<span class="cov-badge"'+(ok?' style="color:'+p.color+';border-color:'+p.color+'66;background:'+p.color+'1a"':'')+'>'+
+            (ok?'\u2713 ':'\u2717 ')+p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
+  });
+  html += '</div></div>';
+
   html += '<div class="groups">';
   groups.forEach(function(gr, gi){
     var offs = {};
@@ -805,7 +841,10 @@ function renderGroups(){
               '<span class="m-country">'+m.country+'</span></div>'+
               '<span class="m-right">'+pillTag+'<span class="m-tz">'+tzShort(tzOf(n))+'</span></span></div>';
     });
-    html += '<div class="pillar-split-label">How the '+gr.length+' split across pillars</div>';
+    var missing = [];
+    PILLARS.forEach(function(p,i){ if(pillarCount[i]===0) missing.push(p); });
+    var covered = PILLARS.length - missing.length;
+    html += '<div class="pillar-split-label">Pillar coverage \u00B7 '+covered+'/'+PILLARS.length+' represented</div>';
     html += '<div class="pillars">';
     PILLARS.forEach(function(p,i){
       var c = pillarCount[i];
@@ -813,6 +852,9 @@ function renderGroups(){
               p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
     });
     html += '</div>';
+    html += (missing.length
+      ? '<div class="cover-note miss">\u26A0\uFE0F Missing '+missing.map(function(p){return p.tag;}).join(", ")+' \u2013 no one here picked it</div>'
+      : '<div class="cover-note ok">\u2705 Every pillar has at least one owner</div>');
     html += '</div>';
   });
   html += '</div>';
@@ -831,8 +873,9 @@ function renderGroups(){
     html += '</div>';
   }
 
-  html += '<div class="hint">Squads only pair people whose 9:00\u201317:00 working hours overlap across timezones. '+
-          'Present teammates are grouped by shared answers within that rule; those who couldn\u2019t attend '+
+  html += '<div class="hint">Squads only pair people whose 9:00\u201317:00 working hours overlap across timezones, '+
+          'and each squad aims to have at least one owner per pillar. '+
+          'Present teammates are grouped by shared answers within those rules; those who couldn\u2019t attend '+
           'still count \u2013 placed by timezone overlap, then at random.</div>';
   if(isRenzo()){
     html += '<div class="actions">';
