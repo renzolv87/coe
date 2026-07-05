@@ -209,6 +209,11 @@
   .cov-badge { font-size:11px; padding:4px 11px; border-radius:20px; border:1px solid rgba(255,255,255,.14);
     color:#7d8aa3; white-space:nowrap; }
   .cov-badge b { font-weight:800; }
+  .cover-note { font-size:11px; font-weight:700; margin-top:10px; text-align:center; border-radius:10px; padding:6px 10px; }
+  .cover-note.ok { color:#7ee0b8; background:rgba(50,185,175,.12); border:1px solid rgba(50,185,175,.3); }
+  .cover-note.miss { color:#f0c17a; background:rgba(245,165,36,.12); border:1px solid rgba(245,165,36,.35); }
+  .pillar-hint { font-size:12px; color:#32B9AF; font-weight:700; text-align:center; margin-top:14px;
+    background:rgba(50,185,175,.08); border:1px solid rgba(50,185,175,.25); border-radius:12px; padding:10px 12px; }
 </style>
 </head>
 <body>
@@ -267,9 +272,9 @@ var QUIZ = [
   { q:"Production is down at 3AM. Your move?",
     a:{ l:"It works on my machine", e:"\u{1F937}", d:"Technically\u2026 not my problem", p:"1461749280684-dccba630e2f6", g:"linear-gradient(135deg,#0f2027,#203a43)" },
     b:{ l:"Have you tried rebooting?", e:"\u{1F50C}", d:"The ancient sacred ritual", p:"1558494949-ef010cbdcc31", g:"linear-gradient(135deg,#232526,#414345)" } },
-  { q:"Which one IS your dev life? \u{1F602}", meme:true,
-    a:{ l:"sudo make me a sandwich", e:"\u{1F96A}", d:"The one command that ends every argument \u00B7 xkcd #149", img:"https://imgs.xkcd.com/comics/sandwich.png", g:"linear-gradient(135deg,#0f2027,#203a43)" },
-    b:{ l:"\u201CMy code\u2019s compiling\u201D", e:"\u23F3", d:"The only sanctioned excuse to leave your desk \u00B7 xkcd #303", img:"https://imgs.xkcd.com/comics/compiling.png", g:"linear-gradient(135deg,#232526,#414345)" } },
+  { q:"Which meme IS your dev life? \u{1F602}", meme:true,
+    a:{ l:"Tabs vs Spaces", e:"\u{1F3B5}", d:"Drake rejects tabs, approves spaces \u2013 the holy war never ends \u{1F4A5}", img:"https://i.imgflip.com/30b1gx.jpg", g:"linear-gradient(135deg,#2b5876,#4e4376)" },
+    b:{ l:"Deploy on Friday?", e:"\u{1F605}", d:"\u201CJust one tiny fix\u201D vs \u201Cit\u2019s 4:59 PM\u201D \u2013 sweating over the button", img:"https://i.imgflip.com/1g8my4.jpg", g:"linear-gradient(135deg,#c31432,#240b36)" } },
   { q:"That meeting today\u2026",
     a:{ l:"Could\u2019ve been an email", e:"\u{1F4E7}", d:"Three bullet points, tops", p:"1498050108023-c5249f4df085", g:"linear-gradient(135deg,#3a7bd5,#3a6073)" },
     b:{ l:"I actually love meetings", e:"\u{1F5E3}\uFE0F", d:"Send more calendar invites", p:"1517245386807-bb43f82c33c4", g:"linear-gradient(135deg,#654ea3,#eaafc8)" } },
@@ -290,7 +295,7 @@ var QUIZ = [
     b:{ l:"An only child", e:"\u{1F451}", d:"The remote was always mine", p:"1519340241574-2cec6aef0c01", g:"linear-gradient(135deg,#a18cd1,#fbc2eb)" } },
   { q:"Every morning, non-negotiable:",
     a:{ l:"Coffee", e:"\u2615", d:"No coffee, no me. Full stop.", p:"1509042239860-f550ce710b93", g:"linear-gradient(135deg,#3e2723,#6d4c41)" },
-    b:{ l:"Tea", e:"\u{1F375}", d:"Slow, warm, civilised.", p:"1544787219-7f47ccb76574", g:"linear-gradient(135deg,#134e5e,#71b280)" } },
+    b:{ l:"Tea", e:"\u{1F375}", d:"Slow, warm, civilised.", p:"1571934811356-5cc061b6821f21f", g:"linear-gradient(135deg,#134e5e,#71b280)" } },
   { q:"When are you truly at your best?",
     a:{ l:"Early bird", e:"\u{1F305}", d:"6AM, coffee, the world is yours", p:"1470252649378-9c29740c9fa8", g:"linear-gradient(135deg,#f6d365,#fda085)" },
     b:{ l:"Night owl", e:"\u{1F989}", d:"Midnight clarity, pure flow", p:"1519682337058-a94d519337bc", g:"linear-gradient(135deg,#0f2027,#2c5364)" } }
@@ -395,11 +400,12 @@ function flagInline(member, dispH, reqH){
 function optionPane(o, side){
   var grad = o.g || "linear-gradient(135deg,#1b2340,#0b0f1c)";
   var isMeme = !!o.img;
-  var url = isMeme ? o.img : ("https://images.unsplash.com/photo-"+o.p+"?auto=format&fit=crop&w=640&h=900&q=70");
+  // Right-sized + compressed so each pane loads fast (auto webp, cropped; low quality is fine behind the dark overlay).
+  var url = isMeme ? o.img : ("https://images.unsplash.com/photo-"+o.p+"?auto=format&fit=crop&w=480&h=640&q=55");
   var imgClass = "qpane-img" + (isMeme ? " qpane-meme" : "");
   return '<div class="qpane" data-action="answer" data-choice="'+side+'">'+
     '<div class="qpane-bg" style="background:'+grad+'"></div>'+
-    '<img class="'+imgClass+'" src="'+url+'" alt="'+o.l+'" onerror="this.style.display=\'none\'">'+
+    '<img class="'+imgClass+'" src="'+url+'" alt="'+o.l+'" decoding="async" fetchpriority="high" onerror="this.style.display=\'none\'">'+
     '<div class="qpane-content">'+
       '<div class="qpane-emoji">'+o.e+'</div>'+
       '<div class="qpane-label">'+o.l+'</div>'+
@@ -844,7 +850,7 @@ function renderGroups(){
     var missing = [];
     PILLARS.forEach(function(p,i){ if(pillarCount[i]===0) missing.push(p); });
     var covered = PILLARS.length - missing.length;
-    html += '<div class="pillar-split-label">Pillar coverage \u00B7 '+covered+'/'+PILLARS.length+' represented</div>';
+    html += '<div class="pillar-split-label">This squad \u00B7 '+covered+'/'+PILLARS.length+' pillars covered</div>';
     html += '<div class="pillars">';
     PILLARS.forEach(function(p,i){
       var c = pillarCount[i];
