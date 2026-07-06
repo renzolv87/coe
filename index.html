@@ -826,7 +826,6 @@ function renderQuiz(){
     if(isRenzo()) html += '<button class="btn-primary" data-action="reveal-groups">Reveal squads \u2192</button>';
     html += '<button class="btn-ghost btn-sm" data-action="demo-quiz">Demo \u00B7 fill all &amp; show squads</button>';
     html += '</div>';
-    html += '<div class="hint" style="margin-top:8px">Demo can be run by Oliver &amp; Renzo. Only Renzo reveals the squads for everyone.</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -913,10 +912,6 @@ function renderGroups(){
     html += '</div>';
   }
 
-  html += '<div class="hint">Squads only pair people whose 9:00\u201317:00 working hours overlap across timezones, '+
-          'and each squad aims to have at least one owner per pillar. '+
-          'Present teammates are grouped by shared answers within those rules; those who couldn\u2019t attend '+
-          'still count \u2013 placed by timezone overlap, then at random.</div>';
   if(isRenzo()){
     html += '<div class="actions">';
     html += '<button class="btn-ghost btn-sm" data-action="reset">Restart session</button>';
