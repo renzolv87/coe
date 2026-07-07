@@ -315,7 +315,24 @@ var QUIZ = [
 var SHARED_KEY = "eas_coe_kickoff_shared_v5";
 var DEVICE_KEY = "eas_coe_kickoff_device_v5";
 var PRESENTATION_SECONDS = 90;
-var HOST_EMAIL = "renzo.lv87@gmail.com";
+/* Host unlock password hash (SHA-256 of the actual password, stored securely) */
+var HOST_UNLOCK_HASH = "9b8fda9e0f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d";
+
+/* Verify unlock password against stored hash */
+function verifyHostPassword(entered){
+  return new Promise(function(resolve){
+    try {
+      var msgBuffer = new TextEncoder().encode(entered);
+      crypto.subtle.digest("SHA-256", msgBuffer).then(function(hashBuffer){
+        var hashArray = Array.from(new Uint8Array(hashBuffer));
+        var hashHex = hashArray.map(function(b){ return ("0" + b.toString(16)).slice(-2); }).join("");
+        resolve(hashHex === HOST_UNLOCK_HASH);
+      });
+    } catch(e){
+      resolve(false);
+    }
+  });
+}
 
 function defaultState(){
   return { checkedIn:[], absent:[], phase:"checkin", order:[], currentIndex:0,
@@ -1003,15 +1020,17 @@ function handleAction(e){
 
   if(action==="unlock-host"){
     if(!isRenzo()) return;
-    var entered = prompt("Renzo host unlock (email)", "");
+    var entered = prompt("Renzo host unlock (password)", "");
     if(!entered) return;
-    if(entered.trim().toLowerCase() === HOST_EMAIL){
-      deviceState.hostUnlocked = true;
-      saveDevice();
-      render();
-    } else {
-      alert("Host unlock failed.");
-    }
+    verifyHostPassword(entered.trim()).then(function(isValid){
+      if(isValid){
+        deviceState.hostUnlocked = true;
+        saveDevice();
+        render();
+      } else {
+        alert("Host unlock failed.");
+      }
+    });
     return;
   }
 
