@@ -222,9 +222,9 @@
   .pillar-hint { font-size:12px; color:#32B9AF; font-weight:700; text-align:center; margin-top:14px;
     background:rgba(50,185,175,.08); border:1px solid rgba(50,185,175,.25); border-radius:12px; padding:10px 12px; }
 </style>
-<!-- Yjs realtime sync libraries -->
-<script src="https://cdn.jsdelivr.net/npm/yjs@13.6.8/dist/yjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/y-websocket@1.5.0/dist/y-websocket.min.js"></script>
+<!-- Realtime cross-device sync: MQTT over WebSockets (public broker + retained state) -->
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js';document.head.appendChild(s);"></script>
 </head>
 <body>
   <div class="wrap">
@@ -365,8 +365,8 @@ function saveShared(){
   var raw = JSON.stringify(sharedState);
   try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw); } catch(e){}
   try { localStorage.setItem(SHARED_KEY, raw); } catch(e){}
-  /* Update realtime map if connected */
-  try { if(realtime.enabled && realtime.map) realtime.map.set("state", raw); } catch(e){}
+  /* Broadcast to every device in real time (retained so late joiners get it too). */
+  publishRealtime(raw);
 }
 function loadShared(){
   var raw = null;
@@ -384,55 +384,181 @@ function loadDevice(){
   if(typeof deviceState.hostUnlocked !== "boolean") deviceState.hostUnlocked = false;
 }
 
-/* Realtime sync object – fallback-friendly. Tries Yjs/y-webrtc if available, else poll + localStorage. */
-var realtime = { enabled:false, map:null };
-function initRealtime(){
-  /* Try to initialize realtime if Yjs is available. If not, fallback is silent (pollShared + localStorage). */
-  try {
-    if(typeof Y !== "undefined" && typeof WebsocketProvider !== "undefined"){
-      var roomID = (new URLSearchParams(window.location.search).get("room") || "coe-kickoff-default");
-      var ydoc = new Y.Doc();
-      var provider = new WebsocketProvider(
-        "wss://demos.yjs.dev",
-        roomID,
-        ydoc
-      );
-      realtime.map = ydoc.getMap("sharedState");
-      /* On first init, populate realtime map from persisted state if map is empty */
-      if(!realtime.map.has("state")){
-        realtime.map.set("state", JSON.stringify(sharedState));
-      }
-      /* Observe changes on the realtime map and apply them immediately */
-      realtime.map.observe(function(event){
-        if(event.keysChanged.has("state")){
-          try {
-            var incoming = realtime.map.get("state");
-            if(incoming) applyIncomingSharedRaw(incoming);
-          } catch(e){}
-        }
-      });
-      provider.on("status", function(event){ 
-        realtime.enabled = (event.status==="connected");
-        if(realtime.enabled && realtime.map.has("state")){
-          applyIncomingSharedRaw(realtime.map.get("state"));
-        }
-      });
-      realtime.enabled = true;
-    }
-  } catch(e){
-    /* Realtime disabled; polling + localStorage fallback will work fine. */
+/* ---------------- Realtime sync (MQTT over WebSockets) ----------------
+   Uses a public MQTT broker with a RETAINED message so every device – anywhere
+   in the world – instantly receives the current session state on connect and on
+   every change. localStorage remains an offline / same-device fallback only. */
+var realtime = { enabled:false, client:null, topic:null };
+var MQTT_BROKERS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt",
+  "wss://test.mosquitto.org:8081/mqtt"
+];
+var mqttBrokerIdx = 0;
+
+function currentRoom(){
+  return (new URLSearchParams(window.location.search).get("room") || "coe-kickoff-default");
+}
+
+function setSyncStatus(state){
+  var el = document.getElementById("syncBadge");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "syncBadge";
+    el.style.cssText = "position:fixed;top:10px;right:12px;z-index:9999;font-size:11px;font-weight:800;"+
+      "padding:5px 10px;border-radius:999px;letter-spacing:.5px;font-family:inherit;pointer-events:none;";
+    document.body.appendChild(el);
+  }
+  if(state==="live"){
+    el.textContent = "\u25CF LIVE";
+    el.style.background = "rgba(50,185,175,.15)";
+    el.style.color = "#32B9AF";
+    el.style.border = "1px solid rgba(50,185,175,.45)";
+  } else if(state==="offline"){
+    el.textContent = "\u25CF OFFLINE";
+    el.style.background = "rgba(226,0,116,.12)";
+    el.style.color = "#ff6ab5";
+    el.style.border = "1px solid rgba(226,0,116,.4)";
+  } else {
+    el.textContent = "\u25CF CONNECTING\u2026";
+    el.style.background = "rgba(245,165,36,.12)";
+    el.style.color = "#f0c17a";
+    el.style.border = "1px solid rgba(245,165,36,.35)";
   }
 }
 
-/* Apply incoming shared state from any source (realtime, localStorage, or backend). */
+function initRealtime(){
+  try {
+    realtime.topic = "eas/coe/kickoff/" + currentRoom() + "/state";
+    waitForMqtt(0);
+  } catch(e){ setSyncStatus("offline"); }
+}
+
+/* The MQTT library may still be loading from the CDN (or a fallback CDN) when we boot.
+   Poll briefly until it's available, then connect. */
+function waitForMqtt(attempt){
+  if(typeof mqtt !== "undefined"){ connectMqtt(); return; }
+  if(attempt > 40){ setSyncStatus("offline"); return; }   /* ~20s max */
+  setSyncStatus("connecting");
+  setTimeout(function(){ waitForMqtt(attempt+1); }, 500);
+}
+
+/* True when the shared state carries no session data yet (safe to overwrite / not worth seeding). */
+function isDefaultState(s){
+  if(!s) return true;
+  return (!s.checkedIn || s.checkedIn.length===0) &&
+         (!s.absent   || s.absent.length===0) &&
+         (s.phase==="checkin") &&
+         (!s.quiz   || Object.keys(s.quiz).length===0) &&
+         (!s.groups || s.groups.length===0);
+}
+
+function connectMqtt(){
+  var broker = MQTT_BROKERS[mqttBrokerIdx % MQTT_BROKERS.length];
+  var clientId = "coe_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
+  var client;
+  try {
+    client = mqtt.connect(broker, {
+      clientId: clientId,
+      keepalive: 30,
+      reconnectPeriod: 0,      /* we handle broker failover manually */
+      connectTimeout: 7000,
+      clean: true
+    });
+  } catch(e){ tryNextBroker(); return; }
+  realtime.client = client;
+
+  var settled = false;
+  client.on("connect", function(){
+    settled = true;
+    realtime.enabled = true;
+    setSyncStatus("live");
+    /* Subscribe – the broker immediately delivers the RETAINED state (if any). */
+    var stamp = realtime.lastIncomingAt || 0;
+    client.subscribe(realtime.topic, { qos: 0 }, function(){
+      /* If no retained state arrives shortly and we already hold real data
+         (e.g. the host set up before the broker was reachable), seed the broker. */
+      setTimeout(function(){
+        var gotRetained = (realtime.lastIncomingAt || 0) > stamp;
+        if(!gotRetained && !isDefaultState(sharedState)){
+          publishRealtime(JSON.stringify(sharedState));
+        }
+      }, 1200);
+    });
+  });
+  client.on("message", function(topic, payload){
+    if(topic !== realtime.topic) return;
+    realtime.lastIncomingAt = Date.now();
+    try { applyIncomingSharedRaw(payload.toString()); } catch(e){}
+  });
+  client.on("close",   function(){ realtime.enabled = false; setSyncStatus("connecting"); if(!settled) tryNextBroker(); });
+  client.on("offline", function(){ realtime.enabled = false; setSyncStatus("connecting"); });
+  client.on("error",   function(){ realtime.enabled = false; try{ client.end(true); }catch(e){} if(!settled) tryNextBroker(); });
+
+  /* Manual reconnect loop: if the socket drops after connecting, retry same broker. */
+  client.on("close", function(){
+    if(settled){ setTimeout(function(){ if(!realtime.enabled) connectMqtt(); }, 2500); }
+  });
+}
+
+function tryNextBroker(){
+  mqttBrokerIdx++;
+  if(mqttBrokerIdx < MQTT_BROKERS.length * 3){
+    setTimeout(connectMqtt, 1500);
+  } else {
+    setSyncStatus("offline");
+  }
+}
+
+function publishRealtime(raw){
+  try {
+    if(realtime.enabled && realtime.client && realtime.topic){
+      /* retain:true => new / returning devices get the latest state the moment they subscribe. */
+      realtime.client.publish(realtime.topic, raw, { retain:true, qos:0 });
+    }
+  } catch(e){}
+}
+
+/* Apply incoming shared state from any source (realtime, localStorage, or backend).
+   Conflict handling:
+   - Last-write-wins by updatedAt for host-driven fields (phase, order, etc.).
+   - quiz answers are merged per-name so simultaneous submissions are never lost.
+   - a device re-asserts its OWN check-in if a concurrent update accidentally dropped it. */
 function applyIncomingSharedRaw(raw){
   if(!raw) return;
   var incoming;
   try { incoming = normalizeState(JSON.parse(raw)); } catch(e){ return; }
-  if(JSON.stringify(incoming) !== JSON.stringify(sharedState)){
-    sharedState = incoming;
-    render();
+
+  /* Ignore stale updates; nudge the stale sender back to our newer state. */
+  if(incoming.updatedAt && sharedState.updatedAt && incoming.updatedAt < sharedState.updatedAt){
+    if(JSON.stringify(incoming) !== JSON.stringify(sharedState)) publishRealtime(JSON.stringify(sharedState));
+    return;
   }
+
+  /* Merge quiz answers by name so nobody's submission is clobbered. */
+  var mergedQuiz = {}, k;
+  for(k in sharedState.quiz){ if(sharedState.quiz.hasOwnProperty(k)) mergedQuiz[k] = sharedState.quiz[k]; }
+  for(k in incoming.quiz){ if(incoming.quiz.hasOwnProperty(k)) mergedQuiz[k] = incoming.quiz[k]; }
+  incoming.quiz = mergedQuiz;
+
+  /* Re-assert my own presence if a concurrent write dropped me. */
+  var me = deviceState.myName, selfReadded = false;
+  if(me && sharedState.checkedIn.indexOf(me)!==-1 &&
+     incoming.checkedIn.indexOf(me)===-1 && incoming.absent.indexOf(me)===-1){
+    incoming.checkedIn = incoming.checkedIn.concat([me]);
+    selfReadded = true;
+  }
+
+  if(JSON.stringify(incoming) === JSON.stringify(sharedState)) return;
+  sharedState = incoming;
+  if(selfReadded){
+    sharedState.updatedAt = Date.now();
+    var raw2 = JSON.stringify(sharedState);
+    try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw2); } catch(e){}
+    try { localStorage.setItem(SHARED_KEY, raw2); } catch(e){}
+    publishRealtime(raw2);
+  }
+  render();
 }
 
 /* ---------------- Helpers ---------------- */
@@ -1198,14 +1324,10 @@ function handleAction(e){
 
 /* ---------------- Sync ---------------- */
 function pollShared(){
+  /* MQTT push keeps every device live; this only covers same-device fallback
+     (custom backend or localStorage) in case the broker is briefly unreachable. */
   var raw = null;
-  /* Try realtime first if connected */
-  if(realtime.enabled && realtime.map && realtime.map.has("state")){
-    try { raw = realtime.map.get("state"); } catch(e){}
-  }
-  /* Fall back to backend storage */
-  if(!raw){ try { if(hasBackend()) raw = window.storage.getItem(SHARED_KEY); } catch(e){} }
-  /* Fall back to localStorage */
+  try { if(hasBackend()) raw = window.storage.getItem(SHARED_KEY); } catch(e){}
   if(!raw){ try { raw = localStorage.getItem(SHARED_KEY); } catch(e){} }
   if(!raw) return;
   applyIncomingSharedRaw(raw);
@@ -1213,14 +1335,15 @@ function pollShared(){
 
 /* ---------------- Boot ---------------- */
 loadDevice();
-initRealtime();
 loadShared();
+setSyncStatus("connecting");
+initRealtime();
 document.addEventListener("click", handleAction);
 window.addEventListener("storage", function(e){
   if(e && e.key===SHARED_KEY && e.newValue) applyIncomingSharedRaw(e.newValue);
 });
 render();
-setInterval(pollShared, 300);
+setInterval(pollShared, 500);
 </script>
 </body>
 </html>
