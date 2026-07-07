@@ -317,6 +317,17 @@ var DEVICE_KEY = "eas_coe_kickoff_device_v5";
 var PRESENTATION_SECONDS = 90;
 var HOST_UNLOCK_HASH = "7e979be3111c5bc766a675a94e9369a4dbe46c3c30a46c4fe7cf25a77bb1e1f8";
 
+/* ---------------- Result export (zero third parties) ---------------- */
+/* This app is 100% client-side and sends NOTHING to any external service. When the squads
+   are revealed, Renzo's host device builds a nicely formatted, self-contained HTML file of
+   the final squads and downloads it locally (also on demand via the button). No email API,
+   no keys, no tracking - no data ever leaves the browser. Renzo then attaches or forwards
+   that file however corporate policy prefers. */
+var EMAIL_CFG = {
+  to: "renzo.lujan-vasquez@t-systems.com",
+  subject: "EAS Automation CoE \u2013 Final Squads"
+};
+
 /* Verify unlock password against stored hash */
 function verifyHostPassword(entered){
   return new Promise(function(resolve){
@@ -1044,7 +1055,11 @@ function renderIntroDone(){
 function renderQuiz(){
   var me = deviceState.myName;
   var iAnswered = me && sharedState.quiz[me];
-  var players = presentPlayers();
+  var iAmCoordinator = (me==="Oliver" || me==="Renzo"); // may play for fun; answers ignored for squads
+  /* Progress is measured only over squad-eligible players (the 15). Oliver & Renzo can
+     play Phase 2 to choose, but their answers never shape the final squads, so they do
+     not count toward "ready to reveal". */
+  var players = eligibleForGroups();
   var answered = players.filter(function(n){ return sharedState.quiz[n]; });
   var totalSteps = QUIZ.length + 1; // + pillar
   preloadAllQuizImages();           // warm the cache so every question appears instantly
@@ -1072,7 +1087,9 @@ function renderQuiz(){
                 '<span class="p-sub">'+p.sub+'</span></button>';
       });
       html += '</div>';
-      html += '<div class="pillar-hint">\u{1F91D} Pick honestly \u2013 every squad needs at least one person per pillar, so your choice shapes the teams.</div>';
+      html += '<div class="pillar-hint">'+(iAmCoordinator
+          ? '\u{1F49C} Just for fun \u2013 as a coordinator your pick won\u2019t affect the squads.'
+          : '\u{1F91D} Pick honestly \u2013 every squad needs at least one person per pillar, so your choice shapes the teams.')+'</div>';
       html += '</div>';
     }
     var pct = Math.round(myQuiz.idx/totalSteps*100);
@@ -1084,8 +1101,10 @@ function renderQuiz(){
     html += '<div class="wait-card">';
     html += '<div class="wait-emoji">\u2705</div>';
     html += '<h2>Thanks, '+me+'!</h2>';
-    html += '<p>Your answers are in. Sit tight while the rest of the team finishes\u2026</p>';
-    html += '<p style="margin-top:10px;color:#32B9AF;font-weight:600">'+answered.length+' / '+players.length+' done</p>';
+    html += (iAmCoordinator
+      ? '<p>Your picks are in \u2013 just for fun! As a coordinator, your answers don\u2019t shape the squads.</p>'
+      : '<p>Your answers are in. Sit tight while the rest of the team finishes\u2026</p>');
+    html += '<p style="margin-top:10px;color:#32B9AF;font-weight:600">'+answered.length+' / '+players.length+' players ready</p>';
     html += '</div>';
   } else {
     html += '<div class="wait-card"><div class="wait-emoji">\u{1F440}</div>'+
@@ -1096,7 +1115,7 @@ function renderQuiz(){
     var absentCount = sharedState.absent.filter(function(n){ return n!=="Oliver" && n!=="Renzo"; }).length;
     html += '<div class="admin-panel">';
     html += '<div class="ap-title">Renzo \u00B7 host controls</div>';
-    html += '<div class="ap-progress"><b>'+answered.length+'</b> of <b>'+players.length+'</b> present have answered'+
+    html += '<div class="ap-progress"><b>'+answered.length+'</b> of <b>'+players.length+'</b> squad players answered'+
             (absentCount?(' \u00B7 <b>'+absentCount+'</b> couldn\u2019t attend (auto-placed by timezone)'):'')+'</div>';
     html += '<div class="actions" style="margin-top:0">';
     if(isHostController()) html += '<button class="btn-primary" data-action="reveal-groups">Reveal squads \u2192</button>';
@@ -1197,11 +1216,157 @@ function renderGroups(){
   }
 
   if(isHostController()){
-    html += '<div class="actions">';
+    html += '<div class="actions" style="flex-direction:column;gap:8px;align-items:stretch">';
+    html += '<button class="btn-teal btn-sm" data-action="email-results">\u{1F4E5} Download squads (HTML)</button>';
+    html += '<div id="emailStatus" class="hint" style="margin:0;text-align:center">'+emailStatusText()+'</div>';
     html += '<button class="btn-ghost btn-sm" data-action="reset">Restart session</button>';
     html += '</div>';
   }
   app.innerHTML = html;
+  maybeAutoEmail();   // host device auto-saves the self-contained HTML summary once per reveal
+}
+
+/* ---------------- Export the squad results (self-contained HTML, zero third parties) ---------------- */
+var emailState = "idle";   // idle | saved
+function mailEsc(s){
+  return String(s).replace(/[&<>"]/g, function(c){
+    return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":"&quot;";
+  });
+}
+function emailStatusText(){
+  if(emailState==="saved") return "\u2705 Squads saved as eas-coe-squads.html \u2013 attach it to Renzo\u2019s email (nothing was sent anywhere)";
+  return "\u2B07\uFE0F Tap to download the squads as a self-contained HTML file \u2013 zero third parties, no data leaves your browser";
+}
+function setEmailStatus(s){
+  emailState = s;
+  var el = document.getElementById("emailStatus");
+  if(el) el.textContent = emailStatusText();
+}
+
+function pillarBadgeEmail(i, count){
+  var p = PILLARS[i];
+  return '<span style="display:inline-block;margin:2px 5px 2px 0;padding:3px 9px;border-radius:12px;font-size:12px;'+
+         'color:'+p.color+';border:1px solid '+p.color+'66;background:'+p.color+'1a">'+p.emoji+' '+mailEsc(p.tag)+' &#215;'+count+'</span>';
+}
+
+/* Full inline-styled, table-based HTML body – renders nicely inside email clients. */
+function buildSquadEmailBody(){
+  var groups = sharedState.groups || [];
+  var names = ["Squad 1","Squad 2","Squad 3"];
+  var teamPillars = [0,0,0];
+  groups.forEach(function(gr){ gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q&&typeof q.pillar==="number") teamPillars[q.pillar]++; }); });
+  var allCovered = teamPillars.every(function(c){ return c>0; });
+
+  var H = '';
+  H += '<div style="background:#0e0e12;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">';
+  H += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">';
+  H += '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%"><tr><td>';
+
+  H += '<div style="text-align:center;margin-bottom:18px">';
+  H += '<div style="font-size:12px;letter-spacing:2px;color:#E20074;font-weight:700">EAS AUTOMATION CENTER OF EXCELLENCE</div>';
+  H += '<div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:6px">\uD83E\uDD1D Final Squads</div>';
+  H += '<div style="font-size:13px;color:#9a9aa8;margin-top:2px">Kickoff \u00B7 '+mailEsc(new Date().toLocaleString())+'</div>';
+  H += '</div>';
+
+  H += '<div style="border-radius:12px;padding:12px 14px;margin-bottom:16px;background:'+(allCovered?'#0f2a22':'#2a220f')+';border:1px solid '+(allCovered?'#1f7a5f':'#7a5f1f')+'">';
+  H += '<div style="font-size:14px;font-weight:700;color:'+(allCovered?'#38ef7d':'#f5c518')+'">'+
+       (allCovered?'\u2705 Every pillar has at least one owner on the team':'\u26A0\uFE0F Some pillars have no owner yet')+'</div>';
+  H += '<div style="margin-top:8px">';
+  PILLARS.forEach(function(p,i){ H += pillarBadgeEmail(i, teamPillars[i]); });
+  H += '</div></div>';
+
+  groups.forEach(function(gr, gi){
+    var offs={}; gr.forEach(function(n){ offs[tzOf(n)]=true; });
+    var tzList = Object.keys(offs).map(function(o){ return tzShort(parseFloat(o)); }).join(" \u00B7 ");
+    var pc=[0,0,0]; gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q&&typeof q.pillar==="number") pc[q.pillar]++; });
+
+    H += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;border-radius:14px;border:1px solid #23232b;background:#15151b"><tr><td style="padding:14px 16px">';
+    H += '<table role="presentation" width="100%"><tr>'+
+         '<td style="font-size:18px;font-weight:800;color:#ffffff">'+mailEsc(names[gi]||("Squad "+(gi+1)))+'</td>'+
+         '<td align="right" style="font-size:12px;color:#8ab4c8;font-weight:700">'+mailEsc(tzList)+'</td></tr></table>';
+
+    gr.forEach(function(n){
+      var m=memberByName(n);
+      var wasAbsent = sharedState.absent.indexOf(n)!==-1;
+      var q=sharedState.quiz[n];
+      var pill=(q&&typeof q.pillar==="number")?PILLARS[q.pillar]:null;
+      H += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:9px"><tr>';
+      H += '<td width="30" valign="middle"><img src="https://flagcdn.com/h40/'+m.code+'.png" height="20" style="height:20px;width:auto;border-radius:2px" alt="'+mailEsc(m.country)+'"></td>';
+      H += '<td valign="middle" style="color:#ffffff;font-size:15px;font-weight:600">'+mailEsc(m.name)+
+           (wasAbsent?' <span style="font-size:10px;color:#f5a524;border:1px solid #f5a52466;border-radius:8px;padding:1px 6px">absent</span>':'')+
+           '<div style="font-size:11px;color:#8a8a99;font-weight:400">'+mailEsc(m.country)+'</div></td>';
+      H += '<td valign="middle" align="right" style="white-space:nowrap">'+
+           (pill?'<span style="font-size:12px;color:'+pill.color+';border:1px solid '+pill.color+'66;background:'+pill.color+'1a;border-radius:10px;padding:2px 8px">'+pill.emoji+' '+mailEsc(pill.tag)+'</span>':'<span style="font-size:12px;color:#777">\u2013</span>')+
+           ' <span style="font-size:11px;color:#8ab4c8;font-weight:700">'+mailEsc(tzShort(tzOf(n)))+'</span></td>';
+      H += '</tr></table>';
+    });
+
+    var covered = [0,1,2].filter(function(i){ return pc[i]>0; }).length;
+    H += '<div style="margin-top:12px;font-size:12px;color:#9a9aa8">This squad \u00B7 '+covered+'/3 pillars covered</div>';
+    H += '<div style="margin-top:5px">';
+    PILLARS.forEach(function(p,i){ H += pillarBadgeEmail(i, pc[i]); });
+    H += '</div>';
+    H += '</td></tr></table>';
+  });
+
+  var coords = ["Oliver","Renzo"].filter(function(n){ return presentPlayers().indexOf(n)!==-1; });
+  if(coords.length){
+    H += '<div style="font-size:12px;letter-spacing:1px;color:#E20074;font-weight:700;margin:6px 0 8px">\u2B50 COORDINATORS</div>';
+    coords.forEach(function(n){ var m=memberByName(n);
+      H += '<table role="presentation" cellpadding="0" cellspacing="0" style="display:inline-table;margin:0 8px 8px 0;border:1px solid #23232b;border-radius:10px;background:#15151b"><tr>'+
+           '<td style="padding:8px 12px"><img src="https://flagcdn.com/h40/'+m.code+'.png" height="18" style="height:18px;width:auto;border-radius:2px;vertical-align:middle" alt="'+mailEsc(m.country)+'"> '+
+           '<span style="color:#ffffff;font-weight:600;font-size:14px;vertical-align:middle">'+mailEsc(m.name)+'</span> '+
+           '<span style="color:#8a8a99;font-size:11px;vertical-align:middle">Coordinator</span></td></tr></table>';
+    });
+  }
+
+  H += '<div style="text-align:center;color:#55555f;font-size:11px;margin-top:18px">Generated automatically by the EAS CoE Kickoff app</div>';
+  H += '</td></tr></table></td></tr></table></div>';
+  return H;
+}
+
+function buildSquadEmailDoc(){
+  return '<!doctype html><html><head><meta charset="utf-8">'+
+         '<meta name="viewport" content="width=device-width,initial-scale=1">'+
+         '<title>'+mailEsc(EMAIL_CFG.subject)+'</title></head>'+
+         '<body style="margin:0">'+buildSquadEmailBody()+'</body></html>';
+}
+function downloadEmailHtml(){
+  try {
+    var blob = new Blob([buildSquadEmailDoc()], { type:"text/html" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "eas-coe-squads.html";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  } catch(e){}
+}
+/* Zero third parties: build a self-contained HTML file of the final squads and download it
+   locally. NOTHING is ever sent to any external service - no email API, no keys, no tracking,
+   no data leaves the browser. Renzo then attaches/forwards this file per corporate policy. */
+function sendSquadEmail(interactive){
+  if(!sharedState.groups || !sharedState.groups.length){
+    if(interactive) alert("Reveal the squads first.");
+    return;
+  }
+  downloadEmailHtml();
+  setEmailStatus("saved");
+}
+
+function groupsSignature(){
+  try { return JSON.stringify(sharedState.groups||[]); } catch(e){ return String(Date.now()); }
+}
+/* On Renzo's host device, auto-save the HTML summary once per revealed squad set. It runs
+   right after the host taps "Reveal squads" (a user gesture, so the browser allows the
+   download). Zero third parties - the file simply lands in Renzo's Downloads folder. */
+function maybeAutoEmail(){
+  if(!isHostController() || sharedState.phase!=="groups") return;
+  var sig = groupsSignature();
+  if(deviceState.emailSig === sig) return;     // already saved these squads on this device
+  deviceState.emailSig = sig;
+  saveDevice();
+  downloadEmailHtml();
+  setEmailStatus("saved");
 }
 
 /* ---------------- Actions ---------------- */
@@ -1211,7 +1376,7 @@ function handleAction(e){
   var action = el.getAttribute("data-action");
 
   // Host-only controls: only Renzo can drive the real session (next speaker, move to Phase 2, etc.)
-  var hostOnly = ["start","prev","next","finish","go-quiz","reveal-groups","reset"];
+  var hostOnly = ["start","prev","next","finish","go-quiz","reveal-groups","email-results","reset"];
   if(hostOnly.indexOf(action)!==-1 && !isHostController()) return;
   // Demo shortcuts can be used by unlocked Renzo host only.
   var demoActions = ["demo","demo-quiz"];
@@ -1370,6 +1535,8 @@ function handleAction(e){
     sharedState.phase = "groups";
     saveShared(); render(); return;
   }
+
+  if(action==="email-results"){ sendSquadEmail(true); return; }
 
   if(action==="reset"){
     if(confirm("Restart the whole session for everyone?")){
