@@ -221,6 +221,15 @@
   .cover-note.miss { color:#f0c17a; background:rgba(245,165,36,.12); border:1px solid rgba(245,165,36,.35); }
   .pillar-hint { font-size:12px; color:#32B9AF; font-weight:700; text-align:center; margin-top:14px;
     background:rgba(50,185,175,.08); border:1px solid rgba(50,185,175,.25); border-radius:12px; padding:10px 12px; }
+
+  /* Phase 2 join picker (latecomers / reloads jump straight into the questions) */
+  .join-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin-top:16px; }
+  .join-name { display:flex; align-items:center; gap:8px; background:#1a2136; border:1px solid rgba(255,255,255,.12);
+    border-radius:12px; padding:10px 12px; color:#e8ecf4; font-size:14px; font-weight:600; text-align:left;
+    cursor:pointer; transition:all .12s; position:relative; }
+  .join-name:hover { border-color:#E20074; background:#20284a; transform:translateY(-1px); }
+  .join-name > span.jn { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .join-dot { color:#32B9AF; font-size:9px; line-height:1; }
 </style>
 <!-- Realtime cross-device sync: MQTT over WebSockets (public broker + retained state) -->
 <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"
@@ -375,10 +384,12 @@ var deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
    tracked by quizNonce - so nobody ever borrows another person's (e.g. Renzo's) question. */
 var myQuiz = { idx:0, answers:[], pillar:null };
 var myQuizNonce = null;
-function saveMyQuiz(){ try { localStorage.setItem(MYQUIZ_KEY, JSON.stringify({ q:myQuiz, n:myQuizNonce })); } catch(e){} }
+/* Per-tab (sessionStorage) so each participant's question progress is fully independent and
+   is never shared with other tabs of the same browser. */
+function saveMyQuiz(){ try { sessionStorage.setItem(MYQUIZ_KEY, JSON.stringify({ q:myQuiz, n:myQuizNonce })); } catch(e){} }
 function loadMyQuiz(){
   try {
-    var r = localStorage.getItem(MYQUIZ_KEY);
+    var r = sessionStorage.getItem(MYQUIZ_KEY);
     if(r){ var o = JSON.parse(r); if(o && o.q){ myQuiz = o.q; myQuizNonce = o.n; } }
   } catch(e){}
 }
@@ -410,11 +421,17 @@ function loadShared(){
   if(raw){ try { sharedState = normalizeState(JSON.parse(raw)); } catch(e){ sharedState = defaultState(); } }
   else { sharedState = defaultState(); }
 }
+/* Device identity is PER-TAB, not per-browser. We use sessionStorage (scoped to a single
+   tab/window) instead of localStorage (shared by every tab of the same browser). Otherwise,
+   opening several tabs to simulate participants would make them all share one identity (e.g.
+   Renzo) and the same quiz progress - which is exactly the "everyone sees Renzo's question"
+   symptom. On real separate devices this behaves identically. Reloads within the tab keep
+   your identity; closing the tab starts fresh. */
 function saveDevice(){
-  try { localStorage.setItem(DEVICE_KEY, JSON.stringify(deviceState)); } catch(e){}
+  try { sessionStorage.setItem(DEVICE_KEY, JSON.stringify(deviceState)); } catch(e){}
 }
 function loadDevice(){
-  try { var raw = localStorage.getItem(DEVICE_KEY); if(raw) deviceState = JSON.parse(raw); } catch(e){}
+  try { var raw = sessionStorage.getItem(DEVICE_KEY); if(raw) deviceState = JSON.parse(raw); } catch(e){}
   if(!deviceState) deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
   if(typeof deviceState.hostUnlocked !== "boolean") deviceState.hostUnlocked = false;
 }
@@ -1152,8 +1169,24 @@ function renderQuiz(){
     html += '<p style="margin-top:10px;color:#32B9AF;font-weight:600">'+answered.length+' / '+players.length+' players ready</p>';
     html += '</div>';
   } else {
-    html += '<div class="wait-card"><div class="wait-emoji">\u{1F440}</div>'+
-            '<h2>Phase 2 in progress</h2><p>Check in on your device to play.</p></div>';
+    /* No identity on this device yet (latecomer, reload, or a freshly opened tab): let them
+       jump straight into Phase 2 by tapping their name - the questions must be available to
+       everyone, not gated behind the check-in screen. Picking a name here checks them in too. */
+    html += '<div class="wait-card">';
+    html += '<div class="wait-emoji">\u{1F44B}</div>';
+    html += '<h2>Join Phase 2</h2>';
+    html += '<p>Tap your name to jump straight into the questions.</p>';
+    html += '<div class="join-grid">';
+    TEAM.forEach(function(member){
+      var taken = sharedState.checkedIn.indexOf(member.name)!==-1;
+      html += '<button class="join-name" data-action="join-quiz" data-name="'+member.name+'">'+
+              flagInline(member,16,40)+'<span class="jn">'+member.name+'</span>'+
+              (taken?'<span class="join-dot" title="Already checked in">\u25CF</span>':'')+
+              '</button>';
+    });
+    html += '</div>';
+    html += '<p style="margin-top:12px;color:#7d8aa3;font-size:12px">'+answered.length+' / '+players.length+' players ready</p>';
+    html += '</div>';
   }
 
   if(canDemo()){
@@ -1475,6 +1508,20 @@ function handleAction(e){
         deviceState.hostUnlocked=false;
       }
     }
+    saveShared(); saveDevice(); render(); return;
+  }
+
+  if(action==="join-quiz"){
+    var jn = el.getAttribute("data-name");
+    if(!jn) return;
+    deviceState.myName = jn;
+    if(jn!=="Renzo") deviceState.hostUnlocked = false;
+    if(sharedState.checkedIn.indexOf(jn)===-1) sharedState.checkedIn.push(jn);
+    var jab = sharedState.absent.indexOf(jn); if(jab!==-1) sharedState.absent.splice(jab,1);
+    /* Deal this device its own fresh questions for the current round, starting at Q1. */
+    myQuiz = { idx:0, answers:[], pillar:null };
+    myQuizNonce = sharedState.quizNonce || 0;
+    saveMyQuiz();
     saveShared(); saveDevice(); render(); return;
   }
 
