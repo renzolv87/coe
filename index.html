@@ -657,7 +657,7 @@ function setHeader(){
   var barWrap = document.querySelector(".bar");
   var bar = document.getElementById("progressBar");
   var label = document.getElementById("progressLabel");
-  var total = TEAM.length, inCount = sharedState.checkedIn.length;
+  var total = TEAM.length, inCount = sharedState.checkedIn.length + sharedState.absent.length;
 
   if(sharedState.phase==="checkin"){
     barWrap.style.display=""; sub.textContent="Check in from your device to join the session";
@@ -703,7 +703,7 @@ function renderCheckin(){
     var isIn = sharedState.checkedIn.indexOf(member.name)!==-1;
     var isAbsent = sharedState.absent.indexOf(member.name)!==-1;
     var isMe = deviceState.myName===member.name;
-    var cls = "card" + (isIn?" in":"") + ((isAbsent && !renzoView)?" absent":"") + (renzoView?" has-mark":"");
+    var cls = "card" + ((isIn || isAbsent)?" in":"") + ((isAbsent && !renzoView)?" absent":"") + (renzoView?" has-mark":"");
     html += '<div class="'+cls+'" data-action="checkin" data-name="'+member.name+'">';
     html += '<div class="check">\u2713</div>';
     if(isMe) html += '<div class="me-tag">You</div>';
