@@ -314,6 +314,7 @@ var QUIZ = [
 /* ---------------- Storage ---------------- */
 var SHARED_KEY = "eas_coe_kickoff_shared_v5";
 var DEVICE_KEY = "eas_coe_kickoff_device_v5";
+var MYQUIZ_KEY = "eas_coe_kickoff_myquiz_v5";
 var PRESENTATION_SECONDS = 90;
 var HOST_UNLOCK_HASH = "7e979be3111c5bc766a675a94e9369a4dbe46c3c30a46c4fe7cf25a77bb1e1f8";
 
@@ -346,7 +347,7 @@ function verifyHostPassword(entered){
 
 function defaultState(){
   return { checkedIn:[], absent:[], phase:"checkin", order:[], currentIndex:0,
-           startedAt:null, quiz:{}, groups:[], updatedAt:0 };
+           startedAt:null, quiz:{}, groups:[], quizNonce:0, updatedAt:0 };
 }
 function normalizeState(s){
   s = s || {};
@@ -359,6 +360,7 @@ function normalizeState(s){
     startedAt: s.startedAt || null,
     quiz:      s.quiz || {},
     groups:    s.groups || [],
+    quizNonce: s.quizNonce || 0,
     updatedAt: s.updatedAt || 0
   };
 }
@@ -366,8 +368,30 @@ function normalizeState(s){
 var sharedState = defaultState();
 var deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
 
-/* in-progress quiz (per device, resets on reload) */
+/* In-progress quiz answering is a PRIVATE, per-device activity that is deliberately kept
+   OUT of the realtime streaming: each person walks their OWN questions locally and only the
+   final submitted answer is shared. Progress is persisted per device (so a reload/reconnect
+   never loses your place) and it re-deals to Question 1 whenever the host (re)starts Phase 2,
+   tracked by quizNonce - so nobody ever borrows another person's (e.g. Renzo's) question. */
 var myQuiz = { idx:0, answers:[], pillar:null };
+var myQuizNonce = null;
+function saveMyQuiz(){ try { localStorage.setItem(MYQUIZ_KEY, JSON.stringify({ q:myQuiz, n:myQuizNonce })); } catch(e){} }
+function loadMyQuiz(){
+  try {
+    var r = localStorage.getItem(MYQUIZ_KEY);
+    if(r){ var o = JSON.parse(r); if(o && o.q){ myQuiz = o.q; myQuizNonce = o.n; } }
+  } catch(e){}
+}
+/* Align this device's local quiz with the current Phase 2 round. When the host starts (or
+   restarts) Phase 2, quizNonce changes and every device independently resets to Q1. */
+function ensureQuizRound(){
+  var nonce = sharedState.quizNonce || 0;
+  if(myQuizNonce !== nonce){
+    myQuiz = { idx:0, answers:[], pillar:null };
+    myQuizNonce = nonce;
+    saveMyQuiz();
+  }
+}
 
 function hasBackend(){ return typeof window.storage !== "undefined" && window.storage; }
 
@@ -571,8 +595,9 @@ function applyIncomingSharedRaw(raw){
   }
 
   if(JSON.stringify(incoming) === JSON.stringify(sharedState)) return;
-  /* Snapshot BEFORE swapping in the new state: is this device mid-answering, and on what phase? */
+  /* Snapshot BEFORE swapping in the new state: am I mid-answering, on what phase, which round? */
   var prevPhase = sharedState.phase;
+  var prevNonce = sharedState.quizNonce || 0;
   var keepQuizStable = busyAnswering();
   sharedState = incoming;
   if(selfReadded){
@@ -583,10 +608,11 @@ function applyIncomingSharedRaw(raw){
     publishRealtime(raw2);
   }
   /* Streaming stays fully live for check-in, presentations, and the final squads. But while
-     I'm personally picking my Phase 2 answers, keep my selection screen perfectly still (the
-     answers merged above are still stored, so the host has everyone's data at reveal time).
-     A real phase change (e.g. the host revealing squads) always re-renders so I move on. */
-  if(keepQuizStable && sharedState.phase===prevPhase) return;
+     I'm personally picking my Phase 2 answers, keep my selection screen perfectly still - UNLESS
+     the host started a brand-new round (quizNonce changed) or the phase actually changed, in
+     which case I must move on. The answers merged above are still stored for the host. */
+  var sameRound = (sharedState.quizNonce||0) === prevNonce;
+  if(keepQuizStable && sharedState.phase===prevPhase && sameRound) return;
   render();
 }
 
@@ -1071,6 +1097,7 @@ function renderIntroDone(){
 
 /* --- Quiz --- */
 function renderQuiz(){
+  ensureQuizRound();                 // this device's questions are 100% local to the current round
   var me = deviceState.myName;
   var iAnswered = me && sharedState.quiz[me];
   var iAmCoordinator = (me==="Oliver" || me==="Renzo"); // may play for fun; answers ignored for squads
@@ -1515,11 +1542,14 @@ function handleAction(e){
   if(action==="go-quiz"){
     sharedState.phase="quiz";
     /* Fresh Phase 2: wipe any answers/squads left over from a previous run or the
-       "Demo · fill all" shortcut, otherwise everyone shows up as "already answered"
-       and the questions never appear. Starting Phase 2 always deals a clean deck. */
+       "Demo · fill all" shortcut, and stamp a NEW quizNonce so every device independently
+       re-deals to Question 1 (nobody inherits another person's current question). */
     sharedState.quiz = {};
     sharedState.groups = [];
+    sharedState.quizNonce = Date.now();
     myQuiz = { idx:0, answers:[], pillar:null };
+    myQuizNonce = sharedState.quizNonce;
+    saveMyQuiz();
     saveShared(); render(); return;
   }
 
@@ -1527,16 +1557,19 @@ function handleAction(e){
     var c = parseInt(el.getAttribute("data-choice"),10);
     myQuiz.answers[myQuiz.idx] = c;
     myQuiz.idx++;
+    saveMyQuiz();
     render(); return;
   }
   if(action==="quiz-back"){
     if(myQuiz.idx>0) myQuiz.idx--;
+    saveMyQuiz();
     render(); return;
   }
   if(action==="quiz-pillar"){
     var p = parseInt(el.getAttribute("data-choice"),10);
     myQuiz.pillar = p;
     sharedState.quiz[deviceState.myName] = { a: myQuiz.answers.slice(), pillar: p };
+    saveMyQuiz();
     saveShared(); render(); return;
   }
 
@@ -1585,6 +1618,7 @@ function pollShared(){
 /* ---------------- Boot ---------------- */
 loadDevice();
 loadShared();
+loadMyQuiz();
 setSyncStatus("connecting");
 initRealtime();
 document.addEventListener("click", handleAction);
