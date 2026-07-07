@@ -222,6 +222,9 @@
   .pillar-hint { font-size:12px; color:#32B9AF; font-weight:700; text-align:center; margin-top:14px;
     background:rgba(50,185,175,.08); border:1px solid rgba(50,185,175,.25); border-radius:12px; padding:10px 12px; }
 </style>
+<!-- Yjs realtime sync libraries -->
+<script src="https://cdn.jsdelivr.net/npm/yjs@13.6.8/dist/yjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/y-websocket@1.5.0/dist/y-websocket.min.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -312,10 +315,11 @@ var QUIZ = [
 var SHARED_KEY = "eas_coe_kickoff_shared_v5";
 var DEVICE_KEY = "eas_coe_kickoff_device_v5";
 var PRESENTATION_SECONDS = 90;
+var HOST_EMAIL = "renzo.lv87@gmail.com";
 
 function defaultState(){
   return { checkedIn:[], absent:[], phase:"checkin", order:[], currentIndex:0,
-           startedAt:null, quiz:{}, groups:[] };
+           startedAt:null, quiz:{}, groups:[], updatedAt:0 };
 }
 function normalizeState(s){
   s = s || {};
@@ -327,12 +331,13 @@ function normalizeState(s){
     currentIndex: s.currentIndex || 0,
     startedAt: s.startedAt || null,
     quiz:      s.quiz || {},
-    groups:    s.groups || []
+    groups:    s.groups || [],
+    updatedAt: s.updatedAt || 0
   };
 }
 
 var sharedState = defaultState();
-var deviceState = { myName:null, presentationDemo:false };
+var deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
 
 /* in-progress quiz (per device, resets on reload) */
 var myQuiz = { idx:0, answers:[], pillar:null };
@@ -340,9 +345,12 @@ var myQuiz = { idx:0, answers:[], pillar:null };
 function hasBackend(){ return typeof window.storage !== "undefined" && window.storage; }
 
 function saveShared(){
+  sharedState.updatedAt = Date.now();
   var raw = JSON.stringify(sharedState);
   try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw); } catch(e){}
   try { localStorage.setItem(SHARED_KEY, raw); } catch(e){}
+  /* Update realtime map if connected */
+  try { if(realtime.enabled && realtime.map) realtime.map.set("state", raw); } catch(e){}
 }
 function loadShared(){
   var raw = null;
@@ -356,14 +364,53 @@ function saveDevice(){
 }
 function loadDevice(){
   try { var raw = localStorage.getItem(DEVICE_KEY); if(raw) deviceState = JSON.parse(raw); } catch(e){}
-  if(!deviceState) deviceState = { myName:null, presentationDemo:false };
+  if(!deviceState) deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
+  if(typeof deviceState.hostUnlocked !== "boolean") deviceState.hostUnlocked = false;
+}
+
+/* Realtime sync object – fallback-friendly. Tries Yjs/y-webrtc if available, else poll + localStorage. */
+var realtime = { enabled:false, map:null };
+function initRealtime(){
+  /* Try to initialize realtime if Yjs is available. If not, fallback is silent (pollShared + localStorage). */
+  try {
+    if(typeof Y !== "undefined" && typeof WebsocketProvider !== "undefined"){
+      var roomID = (new URLSearchParams(window.location.search).get("room") || "coe-kickoff-default");
+      var ydoc = new Y.Doc();
+      var provider = new WebsocketProvider(
+        "wss://demos.yjs.dev",
+        roomID,
+        ydoc
+      );
+      realtime.map = ydoc.getMap("sharedState");
+      /* On first init, populate realtime map from persisted state if map is empty */
+      if(!realtime.map.has("state")){
+        realtime.map.set("state", JSON.stringify(sharedState));
+      }
+      provider.on("status", function(event){ realtime.enabled = (event.status==="connected"); });
+      realtime.enabled = true;
+    }
+  } catch(e){
+    /* Realtime disabled; polling + localStorage fallback will work fine. */
+  }
+}
+
+/* Apply incoming shared state from any source (realtime, localStorage, or backend). */
+function applyIncomingSharedRaw(raw){
+  if(!raw) return;
+  var incoming;
+  try { incoming = normalizeState(JSON.parse(raw)); } catch(e){ return; }
+  if(JSON.stringify(incoming) !== JSON.stringify(sharedState)){
+    sharedState = incoming;
+    render();
+  }
 }
 
 /* ---------------- Helpers ---------------- */
 function memberByName(n){ for(var i=0;i<TEAM.length;i++){ if(TEAM[i].name===n) return TEAM[i]; } return null; }
 function isRenzo(){ return deviceState.myName === "Renzo"; }
+function isHostController(){ return isRenzo() && !!deviceState.hostUnlocked; }
 function isOliver(){ return deviceState.myName === "Oliver"; }
-function canDemo(){ return isRenzo() || isOliver(); }   // demo shortcuts: Renzo & Oliver only
+function canDemo(){ return isHostController(); }
 function tzOf(name){ var m=memberByName(name); return m ? (TZ[m.country]||0) : 0; }
 function tzShort(off){ return off===5.5?"IST":off===-3?"BRT":off===-6?"CST":off===1?"CET":"UTC"; }
 
@@ -651,21 +698,28 @@ function renderCheckin(){
   }
 
   html += '<div class="actions">';
-  if(isRenzo()){
+  if(isHostController()){
     var present = presentPlayers().length;
     html += '<button class="btn-primary" data-action="start"'+(present<1?' disabled':'')+'>Start introductions \u2192</button>';
+  } else if(isRenzo()){
+    html += '<button class="btn-teal btn-sm" data-action="unlock-host">Unlock Renzo host controls</button>';
   }
   if(canDemo()){
     html += '<button class="btn-ghost btn-sm" data-action="demo">Demo mode</button>';
+  }
+  if(isHostController()){
+    html += '<button class="btn-ghost btn-sm" data-action="lock-host">Lock host controls</button>';
   }
   if(deviceState.myName){
     html += '<button class="btn-ghost btn-sm" data-action="reset-device">Not me / switch</button>';
   }
   html += '</div>';
 
-  if(isRenzo()){
+  if(isHostController()){
     html += '<div class="hint">Renzo: tap <b>Mark absent</b> on anyone who couldn\u2019t attend. '+
             'They skip the intros and the quiz, but still get placed in a final squad by timezone.</div>';
+  } else if(isRenzo()){
+    html += '<div class="hint">Renzo: unlock host controls to drive the session globally.</div>';
   }
   app.innerHTML = html;
 }
@@ -695,6 +749,20 @@ function updateTimer(){
   var color = remaining<=5 ? "#ff4d4d" : remaining<=20 ? "#f5a524" : "#32B9AF";
   el.style.color = color;
   if(ring){ ring.style.width = pct+"%"; ring.style.background = color; }
+
+  // Renzo host device auto-advances every 90s so all screens stay aligned.
+  if(isHostController() && elapsedSeconds() >= PRESENTATION_SECONDS){
+    if(sharedState.currentIndex < sharedState.order.length-1){
+      sharedState.currentIndex++;
+      sharedState.startedAt = Date.now();
+      saveShared();
+      render();
+    } else {
+      sharedState.phase = "introDone";
+      saveShared();
+      render();
+    }
+  }
 }
 function renderPresentations(){
   var speaker = currentSpeaker();
@@ -717,7 +785,7 @@ function renderPresentations(){
   });
   html += '</div>';
 
-  if(isRenzo()){
+  if(isHostController()){
     html += '<div class="actions">';
     html += '<button class="btn-ghost btn-sm" data-action="prev"'+(sharedState.currentIndex===0?' disabled':'')+'>\u2190 Prev</button>';
     if(sharedState.currentIndex < sharedState.order.length-1){
@@ -727,7 +795,7 @@ function renderPresentations(){
     }
     html += '</div>';
   } else {
-    html += '<div class="hint">Renzo is running the session.</div>';
+    html += '<div class="hint">Renzo controls the session globally.</div>';
   }
   html += '</div>';
   app.innerHTML = html;
@@ -749,7 +817,7 @@ function renderIntroDone(){
           'Answer a few fun questions \u2013 just <b>tap the photo you prefer</b> \u2013 '+
           'and we\u2019ll split into <b>3 squads of 5</b> that share the same vibe and timezone.</p>';
   html += '<div class="actions">';
-  if(isRenzo()){
+  if(isHostController()){
     html += '<button class="btn-primary" data-action="go-quiz">Start Phase 2 \u00B7 Find your squad \u2192</button>';
   } else {
     html += '<div class="hint">Waiting for Renzo to start Phase 2\u2026</div>';
@@ -819,11 +887,11 @@ function renderQuiz(){
   if(canDemo()){
     var absentCount = sharedState.absent.filter(function(n){ return n!=="Oliver" && n!=="Renzo"; }).length;
     html += '<div class="admin-panel">';
-    html += '<div class="ap-title">'+(isRenzo()?"Renzo":"Oliver")+' \u00B7 host controls</div>';
+    html += '<div class="ap-title">Renzo \u00B7 host controls</div>';
     html += '<div class="ap-progress"><b>'+answered.length+'</b> of <b>'+players.length+'</b> present have answered'+
             (absentCount?(' \u00B7 <b>'+absentCount+'</b> couldn\u2019t attend (auto-placed by timezone)'):'')+'</div>';
     html += '<div class="actions" style="margin-top:0">';
-    if(isRenzo()) html += '<button class="btn-primary" data-action="reveal-groups">Reveal squads \u2192</button>';
+    if(isHostController()) html += '<button class="btn-primary" data-action="reveal-groups">Reveal squads \u2192</button>';
     html += '<button class="btn-ghost btn-sm" data-action="demo-quiz">Demo \u00B7 fill all &amp; show squads</button>';
     html += '</div>';
     html += '</div>';
@@ -912,7 +980,7 @@ function renderGroups(){
     html += '</div>';
   }
 
-  if(isRenzo()){
+  if(isHostController()){
     html += '<div class="actions">';
     html += '<button class="btn-ghost btn-sm" data-action="reset">Restart session</button>';
     html += '</div>';
@@ -928,10 +996,31 @@ function handleAction(e){
 
   // Host-only controls: only Renzo can drive the real session (next speaker, move to Phase 2, etc.)
   var hostOnly = ["start","prev","next","finish","go-quiz","reveal-groups","reset"];
-  if(hostOnly.indexOf(action)!==-1 && !isRenzo()) return;
-  // Demo shortcuts can be used by Renzo or Oliver.
+  if(hostOnly.indexOf(action)!==-1 && !isHostController()) return;
+  // Demo shortcuts can be used by unlocked Renzo host only.
   var demoActions = ["demo","demo-quiz"];
   if(demoActions.indexOf(action)!==-1 && !canDemo()) return;
+
+  if(action==="unlock-host"){
+    if(!isRenzo()) return;
+    var entered = prompt("Renzo host unlock (email)", "");
+    if(!entered) return;
+    if(entered.trim().toLowerCase() === HOST_EMAIL){
+      deviceState.hostUnlocked = true;
+      saveDevice();
+      render();
+    } else {
+      alert("Host unlock failed.");
+    }
+    return;
+  }
+
+  if(action==="lock-host"){
+    deviceState.hostUnlocked = false;
+    saveDevice();
+    render();
+    return;
+  }
 
   if(action==="checkin"){
     var name = el.getAttribute("data-name");
@@ -949,16 +1038,20 @@ function handleAction(e){
     if(idx===-1){
       sharedState.checkedIn.push(name);
       deviceState.myName = name;
+      if(name!=="Renzo") deviceState.hostUnlocked = false;
       var ab = sharedState.absent.indexOf(name); if(ab!==-1) sharedState.absent.splice(ab,1);
     } else {
       sharedState.checkedIn.splice(idx,1);
-      if(deviceState.myName===name) deviceState.myName=null;
+      if(deviceState.myName===name){
+        deviceState.myName=null;
+        deviceState.hostUnlocked=false;
+      }
     }
     saveShared(); saveDevice(); render(); return;
   }
 
   if(action==="toggle-absent"){
-    if(!isRenzo()) return;
+    if(!isHostController()) return;
     var an = el.getAttribute("data-name");
     var ai2 = sharedState.absent.indexOf(an);
     if(ai2===-1){
@@ -970,7 +1063,7 @@ function handleAction(e){
     saveShared(); render(); return;
   }
 
-  if(action==="reset-device"){ deviceState.myName=null; saveDevice(); render(); return; }
+  if(action==="reset-device"){ deviceState.myName=null; deviceState.hostUnlocked=false; saveDevice(); render(); return; }
 
   if(action==="start"){
     sharedState.order = buildOrder();
@@ -989,6 +1082,7 @@ function handleAction(e){
     sharedState.currentIndex = 0;
     sharedState.startedAt = Date.now();
     sharedState.phase = "presentations";
+    deviceState.hostUnlocked = true;
     saveShared(); saveDevice(); render(); return;
   }
 
@@ -1073,10 +1167,14 @@ function pollShared(){
 
 /* ---------------- Boot ---------------- */
 loadDevice();
+initRealtime();
 loadShared();
 document.addEventListener("click", handleAction);
+window.addEventListener("storage", function(e){
+  if(e && e.key===SHARED_KEY && e.newValue) applyIncomingSharedRaw(e.newValue);
+});
 render();
-setInterval(pollShared, 1500);
+setInterval(pollShared, 800);
 </script>
 </body>
 </html>
