@@ -315,6 +315,8 @@ var QUIZ = [
 var SHARED_KEY = "eas_coe_kickoff_shared_v5";
 var DEVICE_KEY = "eas_coe_kickoff_device_v5";
 var MYQUIZ_KEY = "eas_coe_kickoff_myquiz_v5";
+var RESET_SEEN_KEY = "eas_coe_kickoff_resetseen_v5";  // last Renzo-reset epoch this device honored
+var seenResetEpoch = 0;
 var PRESENTATION_SECONDS = 90;
 var HOST_UNLOCK_HASH = "7e979be3111c5bc766a675a94e9369a4dbe46c3c30a46c4fe7cf25a77bb1e1f8";
 
@@ -347,7 +349,7 @@ function verifyHostPassword(entered){
 
 function defaultState(){
   return { checkedIn:[], absent:[], phase:"checkin", order:[], currentIndex:0,
-           startedAt:null, quiz:{}, groups:[], quizNonce:0, updatedAt:0 };
+           startedAt:null, quiz:{}, groups:[], quizNonce:0, resetId:0, updatedAt:0 };
 }
 function normalizeState(s){
   s = s || {};
@@ -361,6 +363,7 @@ function normalizeState(s){
     quiz:      s.quiz || {},
     groups:    s.groups || [],
     quizNonce: s.quizNonce || 0,
+    resetId:   s.resetId || 0,
     updatedAt: s.updatedAt || 0
   };
 }
@@ -537,6 +540,7 @@ function connectMqtt(){
         realtime.resetDone = true;
         setTimeout(function(){
           sharedState = defaultState();
+          sharedState.resetId = Date.now();     // new session generation for all devices
           sharedState.updatedAt = Date.now();
           var raw = JSON.stringify(sharedState);
           try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw); } catch(e){}
@@ -595,10 +599,40 @@ function busyAnswering(){
    - Last-write-wins by updatedAt for host-driven fields (phase, order, etc.).
    - quiz answers are merged per-name so simultaneous submissions are never lost.
    - a device re-asserts its OWN check-in if a concurrent update accidentally dropped it. */
+/* Wipe every local trace on THIS device and adopt the fresh session. Triggered when Renzo's
+   password-gated reset reaches us (a newer resetId): cached identity, check-in, answers and
+   quiz progress ALL clear, and we drop back to the check-in screen. This is what makes
+   "start from zero on any device" actually work, even on phones that already answered. */
+function applyHardReset(incoming){
+  try { sessionStorage.removeItem(DEVICE_KEY); } catch(e){}
+  try { sessionStorage.removeItem(MYQUIZ_KEY); } catch(e){}
+  deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
+  myQuiz = { idx:0, answers:[], pillar:null };
+  myQuizNonce = incoming.quizNonce || 0;
+  sharedState = incoming;
+  var raw = JSON.stringify(sharedState);
+  try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw); } catch(e){}
+  try { localStorage.setItem(SHARED_KEY, raw); } catch(e){}
+  render();
+}
+
 function applyIncomingSharedRaw(raw){
   if(!raw) return;
   var incoming;
   try { incoming = normalizeState(JSON.parse(raw)); } catch(e){ return; }
+
+  /* Session generation guard – a host reset bumps resetId and defines a brand-new session.
+     - Newer resetId : a reset happened → HARD-wipe this device and start clean (bypasses the
+                       quiz merge and self-re-add below, so answered devices truly go to zero).
+     - Older resetId : a straggler still on the previous session → ignore it and nudge it back
+                       with our current (reset) state so everyone converges.
+     - Same  resetId : normal live sync continues below. */
+  var localReset = sharedState.resetId || 0, inReset = incoming.resetId || 0;
+  if(inReset > localReset){ applyHardReset(incoming); return; }
+  if(inReset < localReset){
+    if(realtime.enabled) publishRealtime(JSON.stringify(sharedState));
+    return;
+  }
 
   /* Ignore stale updates; nudge the stale sender back to our newer state. */
   if(incoming.updatedAt && sharedState.updatedAt && incoming.updatedAt < sharedState.updatedAt){
@@ -1006,7 +1040,7 @@ function renderCheckin(){
 
   if(isHostController()){
     html += '<div class="hint">Renzo: tap <b>Mark absent</b> on anyone who couldn\u2019t attend. '+
-            'They skip the intros and the quiz, but still get placed in a final squad by timezone.</div>';
+            'They skip the intros and the quiz, but still join a final squad with everyone else.</div>';
   } else if(isRenzo()){
     html += '<div class="hint">Renzo: unlock host controls to drive the session globally.</div>';
   }
@@ -1124,10 +1158,7 @@ function renderQuiz(){
   ensureQuizRound();                 // this device's questions are 100% local to the current round
   var me = deviceState.myName;
   var iAnswered = me && sharedState.quiz[me];
-  var iAmCoordinator = (me==="Oliver" || me==="Renzo"); // may play for fun; answers ignored for squads
-  /* Progress is measured only over squad-eligible players (the 15). Oliver & Renzo can
-     play Phase 2 to choose, but their answers never shape the final squads, so they do
-     not count toward "ready to reveal". */
+  /* Progress is measured only over squad-eligible players (the 15). */
   var players = eligibleForGroups();
   var answered = players.filter(function(n){ return sharedState.quiz[n]; });
   var totalSteps = QUIZ.length + 1; // + pillar
@@ -1156,9 +1187,7 @@ function renderQuiz(){
                 '<span class="p-sub">'+p.sub+'</span></button>';
       });
       html += '</div>';
-      html += '<div class="pillar-hint">'+(iAmCoordinator
-          ? '\u{1F49C} Just for fun \u2013 as a coordinator your pick won\u2019t affect the squads.'
-          : '\u{1F91D} Pick honestly \u2013 every squad needs at least one person per pillar, so your choice shapes the teams.')+'</div>';
+      html += '<div class="pillar-hint">\u{1F91D} Pick honestly \u2013 choose the pillar that truly feels like you.</div>';
       html += '</div>';
     }
     var pct = Math.round(myQuiz.idx/totalSteps*100);
@@ -1170,9 +1199,7 @@ function renderQuiz(){
     html += '<div class="wait-card">';
     html += '<div class="wait-emoji">\u2705</div>';
     html += '<h2>Thanks, '+me+'!</h2>';
-    html += (iAmCoordinator
-      ? '<p>Your picks are in \u2013 just for fun! As a coordinator, your answers don\u2019t shape the squads.</p>'
-      : '<p>Your answers are in. Sit tight while the rest of the team finishes\u2026</p>');
+    html += '<p>Your answers are in. Sit tight while the rest of the team finishes\u2026</p>';
     html += '<p style="margin-top:10px;color:#32B9AF;font-weight:600">'+answered.length+' / '+players.length+' players ready</p>';
     html += '</div>';
   } else {
@@ -1209,33 +1236,26 @@ function renderGroups(){
 
   html += '<div class="section-label">\u{1F91D} Your squads for the mission</div>';
 
-  /* Team-wide pillar coverage \u2013 make sure every chosen pillar has at least one owner */
+  /* A fun tally of the three pillars across the team. */
   var teamPillars = [0,0,0];
   groups.forEach(function(gr){ gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q && typeof q.pillar==="number") teamPillars[q.pillar]++; }); });
-  var allCovered = teamPillars.every(function(c){ return c>0; });
-  html += '<div class="coverage '+(allCovered?'cov-ok':'cov-warn')+'">';
-  html += '<div class="cov-head">'+(allCovered
-      ? '\u2705 Pillar coverage \u00B7 every pillar has at least one owner on the team'
-      : '\u26A0\uFE0F Pillar coverage \u00B7 make sure every pillar has at least one owner')+'</div>';
+  html += '<div class="coverage cov-ok">';
+  html += '<div class="cov-head">\u{1F9E9} Our three pillars</div>';
   html += '<div class="cov-badges">';
   PILLARS.forEach(function(p,i){
-    var c = teamPillars[i], ok = c>0;
-    html += '<span class="cov-badge"'+(ok?' style="color:'+p.color+';border-color:'+p.color+'66;background:'+p.color+'1a"':'')+'>'+
-            (ok?'\u2713 ':'\u2717 ')+p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
+    var c = teamPillars[i];
+    html += '<span class="cov-badge" style="color:'+p.color+';border-color:'+p.color+'66;background:'+p.color+'1a">'+
+            p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
   });
   html += '</div></div>';
 
   html += '<div class="groups">';
   groups.forEach(function(gr, gi){
-    var offs = {};
-    gr.forEach(function(n){ offs[tzOf(n)] = true; });
-    var tzList = Object.keys(offs).map(function(o){ return tzShort(parseFloat(o)); });
     var pillarCount = [0,0,0];
     gr.forEach(function(n){ var p=sharedState.quiz[n]; if(p && typeof p.pillar==="number") pillarCount[p.pillar]++; });
 
     html += '<div class="group-card g'+gi+'">';
-    html += '<div class="group-head"><div class="group-title">'+(names[gi]||("Squad "+(gi+1)))+'</div>'+
-            '<div class="group-tz">'+tzList.join(" \u00B7 ")+'</div></div>';
+    html += '<div class="group-head"><div class="group-title">'+(names[gi]||("Squad "+(gi+1)))+'</div></div>';
     gr.forEach(function(n){
       var m = memberByName(n);
       var wasAbsent = sharedState.absent.indexOf(n)!==-1;
@@ -1247,12 +1267,8 @@ function renderGroups(){
       html += '<div class="member">'+flagInline(m,22,60)+
               '<div class="m-info"><span class="m-name">'+m.name+(wasAbsent?'<span class="m-absent-tag">absent</span>':'')+'</span>'+
               '<span class="m-country">'+m.country+'</span></div>'+
-              '<span class="m-right">'+pillTag+'<span class="m-tz">'+tzShort(tzOf(n))+'</span></span></div>';
+              '<span class="m-right">'+pillTag+'</span></div>';
     });
-    var missing = [];
-    PILLARS.forEach(function(p,i){ if(pillarCount[i]===0) missing.push({p:p,i:i}); });
-    var covered = PILLARS.length - missing.length;
-    html += '<div class="pillar-split-label">This squad \u00B7 '+covered+'/'+PILLARS.length+' pillars covered</div>';
     html += '<div class="pillars">';
     PILLARS.forEach(function(p,i){
       var c = pillarCount[i];
@@ -1260,34 +1276,9 @@ function renderGroups(){
               p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
     });
     html += '</div>';
-    if(!missing.length){
-      html += '<div class="cover-note ok">\u2705 Every pillar has at least one owner</div>';
-    } else {
-      /* Distinguish "nobody chose it" from "scarce pillar, owned by another squad". */
-      var noSupply = missing.filter(function(m){ return teamPillars[m.i]===0; }).map(function(m){ return m.p.tag; });
-      var elsewhere = missing.filter(function(m){ return teamPillars[m.i]>0; }).map(function(m){ return m.p.tag; });
-      var msg = [];
-      if(noSupply.length)  msg.push('\u26A0\uFE0F Missing '+noSupply.join(", ")+' \u2013 no one picked it');
-      if(elsewhere.length) msg.push('\u2139\uFE0F '+elsewhere.join(", ")+' \u2013 limited picks, covered in another squad');
-      html += '<div class="cover-note '+(noSupply.length?'miss':'ok')+'">'+msg.join('<br>')+'</div>';
-    }
     html += '</div>';
   });
   html += '</div>';
-
-  /* Coordinators */
-  var coords = ["Oliver","Renzo"].filter(function(n){ return presentPlayers().indexOf(n)!==-1; });
-  if(coords.length){
-    html += '<div class="section-label">\u2B50 Coordinators \u00B7 guiding every squad</div>';
-    html += '<div class="coord">';
-    coords.forEach(function(n){
-      var m = memberByName(n);
-      html += '<div class="coord-card">'+flagInline(m,24,60)+
-              '<div><div class="coord-name">'+m.name+'</div>'+
-              '<div class="coord-role">Coordinator</div></div></div>';
-    });
-    html += '</div>';
-  }
 
   if(isHostController()){
     html += '<div class="actions" style="flex-direction:column;gap:8px;align-items:stretch">';
@@ -1329,7 +1320,6 @@ function buildSquadEmailBody(){
   var names = ["Squad 1","Squad 2","Squad 3"];
   var teamPillars = [0,0,0];
   groups.forEach(function(gr){ gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q&&typeof q.pillar==="number") teamPillars[q.pillar]++; }); });
-  var allCovered = teamPillars.every(function(c){ return c>0; });
 
   var H = '';
   H += '<div style="background:#0e0e12;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">';
@@ -1342,22 +1332,18 @@ function buildSquadEmailBody(){
   H += '<div style="font-size:13px;color:#9a9aa8;margin-top:2px">Kickoff \u00B7 '+mailEsc(new Date().toLocaleString())+'</div>';
   H += '</div>';
 
-  H += '<div style="border-radius:12px;padding:12px 14px;margin-bottom:16px;background:'+(allCovered?'#0f2a22':'#2a220f')+';border:1px solid '+(allCovered?'#1f7a5f':'#7a5f1f')+'">';
-  H += '<div style="font-size:14px;font-weight:700;color:'+(allCovered?'#38ef7d':'#f5c518')+'">'+
-       (allCovered?'\u2705 Every pillar has at least one owner on the team':'\u26A0\uFE0F Some pillars have no owner yet')+'</div>';
+  H += '<div style="border-radius:12px;padding:12px 14px;margin-bottom:16px;background:#0f2a22;border:1px solid #1f7a5f">';
+  H += '<div style="font-size:14px;font-weight:700;color:#38ef7d">\uD83E\uDDE9 Our three pillars</div>';
   H += '<div style="margin-top:8px">';
   PILLARS.forEach(function(p,i){ H += pillarBadgeEmail(i, teamPillars[i]); });
   H += '</div></div>';
 
   groups.forEach(function(gr, gi){
-    var offs={}; gr.forEach(function(n){ offs[tzOf(n)]=true; });
-    var tzList = Object.keys(offs).map(function(o){ return tzShort(parseFloat(o)); }).join(" \u00B7 ");
     var pc=[0,0,0]; gr.forEach(function(n){ var q=sharedState.quiz[n]; if(q&&typeof q.pillar==="number") pc[q.pillar]++; });
 
     H += '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;border-radius:14px;border:1px solid #23232b;background:#15151b"><tr><td style="padding:14px 16px">';
     H += '<table role="presentation" width="100%"><tr>'+
-         '<td style="font-size:18px;font-weight:800;color:#ffffff">'+mailEsc(names[gi]||("Squad "+(gi+1)))+'</td>'+
-         '<td align="right" style="font-size:12px;color:#8ab4c8;font-weight:700">'+mailEsc(tzList)+'</td></tr></table>';
+         '<td style="font-size:18px;font-weight:800;color:#ffffff">'+mailEsc(names[gi]||("Squad "+(gi+1)))+'</td></tr></table>';
 
     gr.forEach(function(n){
       var m=memberByName(n);
@@ -1371,28 +1357,15 @@ function buildSquadEmailBody(){
            '<div style="font-size:11px;color:#8a8a99;font-weight:400">'+mailEsc(m.country)+'</div></td>';
       H += '<td valign="middle" align="right" style="white-space:nowrap">'+
            (pill?'<span style="font-size:12px;color:'+pill.color+';border:1px solid '+pill.color+'66;background:'+pill.color+'1a;border-radius:10px;padding:2px 8px">'+pill.emoji+' '+mailEsc(pill.tag)+'</span>':'<span style="font-size:12px;color:#777">\u2013</span>')+
-           ' <span style="font-size:11px;color:#8ab4c8;font-weight:700">'+mailEsc(tzShort(tzOf(n)))+'</span></td>';
+           '</td>';
       H += '</tr></table>';
     });
 
-    var covered = [0,1,2].filter(function(i){ return pc[i]>0; }).length;
-    H += '<div style="margin-top:12px;font-size:12px;color:#9a9aa8">This squad \u00B7 '+covered+'/3 pillars covered</div>';
-    H += '<div style="margin-top:5px">';
+    H += '<div style="margin-top:12px">';
     PILLARS.forEach(function(p,i){ H += pillarBadgeEmail(i, pc[i]); });
     H += '</div>';
     H += '</td></tr></table>';
   });
-
-  var coords = ["Oliver","Renzo"].filter(function(n){ return presentPlayers().indexOf(n)!==-1; });
-  if(coords.length){
-    H += '<div style="font-size:12px;letter-spacing:1px;color:#E20074;font-weight:700;margin:6px 0 8px">\u2B50 COORDINATORS</div>';
-    coords.forEach(function(n){ var m=memberByName(n);
-      H += '<table role="presentation" cellpadding="0" cellspacing="0" style="display:inline-table;margin:0 8px 8px 0;border:1px solid #23232b;border-radius:10px;background:#15151b"><tr>'+
-           '<td style="padding:8px 12px"><img src="https://flagcdn.com/h40/'+m.code+'.png" height="18" style="height:18px;width:auto;border-radius:2px;vertical-align:middle" alt="'+mailEsc(m.country)+'"> '+
-           '<span style="color:#ffffff;font-weight:600;font-size:14px;vertical-align:middle">'+mailEsc(m.name)+'</span> '+
-           '<span style="color:#8a8a99;font-size:11px;vertical-align:middle">Coordinator</span></td></tr></table>';
-    });
-  }
 
   H += '<div style="text-align:center;color:#55555f;font-size:11px;margin-top:18px">Generated automatically by the EAS CoE Kickoff app</div>';
   H += '</td></tr></table></td></tr></table></div>';
@@ -1660,7 +1633,9 @@ function ensureHostResetButton(){
 /* Full restart for everyone: clean local state AND overwrite the broker's retained message
    (retain:true) so every current and future device drops back to a fresh check-in. */
 function doHostReset(){
+  var prevReset = sharedState.resetId || 0;
   sharedState = defaultState();
+  sharedState.resetId = Math.max(prevReset + 1, Date.now());  // strictly greater -> wins on every device
   sharedState.updatedAt = Date.now();          // newer than any stale retained state
   deviceState.myName = null;
   deviceState.hostUnlocked = false;
@@ -1696,6 +1671,7 @@ if(RESET_ON_BOOT){
   try { sessionStorage.removeItem(DEVICE_KEY); } catch(e){}
   try { sessionStorage.removeItem(MYQUIZ_KEY); } catch(e){}
   sharedState = defaultState();
+  sharedState.resetId = Date.now();            // new session generation -> forces every device to zero
   sharedState.updatedAt = Date.now();          // newer than any retained testing state
   deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
   myQuiz = { idx:0, answers:[], pillar:null };
