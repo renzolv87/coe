@@ -402,7 +402,21 @@ function initRealtime(){
       if(!realtime.map.has("state")){
         realtime.map.set("state", JSON.stringify(sharedState));
       }
-      provider.on("status", function(event){ realtime.enabled = (event.status==="connected"); });
+      /* Observe changes on the realtime map and apply them immediately */
+      realtime.map.observe(function(event){
+        if(event.keysChanged.has("state")){
+          try {
+            var incoming = realtime.map.get("state");
+            if(incoming) applyIncomingSharedRaw(incoming);
+          } catch(e){}
+        }
+      });
+      provider.on("status", function(event){ 
+        realtime.enabled = (event.status==="connected");
+        if(realtime.enabled && realtime.map.has("state")){
+          applyIncomingSharedRaw(realtime.map.get("state"));
+        }
+      });
       realtime.enabled = true;
     }
   } catch(e){
@@ -1172,15 +1186,16 @@ function handleAction(e){
 /* ---------------- Sync ---------------- */
 function pollShared(){
   var raw = null;
-  try { if(hasBackend()) raw = window.storage.getItem(SHARED_KEY); } catch(e){}
+  /* Try realtime first if connected */
+  if(realtime.enabled && realtime.map && realtime.map.has("state")){
+    try { raw = realtime.map.get("state"); } catch(e){}
+  }
+  /* Fall back to backend storage */
+  if(!raw){ try { if(hasBackend()) raw = window.storage.getItem(SHARED_KEY); } catch(e){} }
+  /* Fall back to localStorage */
   if(!raw){ try { raw = localStorage.getItem(SHARED_KEY); } catch(e){} }
   if(!raw) return;
-  var incoming;
-  try { incoming = normalizeState(JSON.parse(raw)); } catch(e){ return; }
-  if(JSON.stringify(incoming) !== JSON.stringify(sharedState)){
-    sharedState = incoming;
-    render();
-  }
+  applyIncomingSharedRaw(raw);
 }
 
 /* ---------------- Boot ---------------- */
@@ -1192,7 +1207,7 @@ window.addEventListener("storage", function(e){
   if(e && e.key===SHARED_KEY && e.newValue) applyIncomingSharedRaw(e.newValue);
 });
 render();
-setInterval(pollShared, 800);
+setInterval(pollShared, 300);
 </script>
 </body>
 </html>
