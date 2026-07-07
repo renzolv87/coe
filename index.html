@@ -438,6 +438,10 @@ var MQTT_BROKERS = [
   "wss://test.mosquitto.org:8081/mqtt"
 ];
 var mqttBrokerIdx = 0;
+/* Testing / host escape hatch: loading the page with ?reset=1 (or ?fresh=1) starts a clean
+   session AND overwrites the broker's RETAINED message, so nobody keeps inheriting a stale
+   phase (e.g. “Phase 2 in progress” left over from earlier testing). */
+var RESET_ON_BOOT = false;
 
 function currentRoom(){
   return (new URLSearchParams(window.location.search).get("room") || "coe-kickoff-default");
@@ -527,6 +531,20 @@ function connectMqtt(){
           publishRealtime(JSON.stringify(sharedState));
         }
       }, 1200);
+      /* ?reset=1 : replace whatever is RETAINED on the broker with a clean check-in state,
+         so every current and future device drops back to the start. */
+      if(RESET_ON_BOOT && !realtime.resetDone){
+        realtime.resetDone = true;
+        setTimeout(function(){
+          sharedState = defaultState();
+          sharedState.updatedAt = Date.now();
+          var raw = JSON.stringify(sharedState);
+          try { if(hasBackend()) window.storage.setItem(SHARED_KEY, raw); } catch(e){}
+          try { localStorage.setItem(SHARED_KEY, raw); } catch(e){}
+          publishRealtime(raw);   // retain:true overwrites the stale retained message
+          render();
+        }, 350);
+      }
     });
   });
   client.on("message", function(topic, payload){
@@ -1275,7 +1293,7 @@ function renderGroups(){
     html += '<div class="actions" style="flex-direction:column;gap:8px;align-items:stretch">';
     html += '<button class="btn-teal btn-sm" data-action="email-results">\u{1F4E5} Download squads (HTML)</button>';
     html += '<div id="emailStatus" class="hint" style="margin:0;text-align:center">'+emailStatusText()+'</div>';
-    html += '<button class="btn-ghost btn-sm" data-action="reset">Restart session</button>';
+    html += '<button class="btn-ghost btn-sm" data-action="host-reset">Restart session</button>';
     html += '</div>';
   }
   app.innerHTML = html;
@@ -1432,7 +1450,7 @@ function handleAction(e){
   var action = el.getAttribute("data-action");
 
   // Host-only controls: only Renzo can drive the real session (next speaker, move to Phase 2, etc.)
-  var hostOnly = ["start","prev","next","finish","go-quiz","reveal-groups","email-results","reset"];
+  var hostOnly = ["start","prev","next","finish","go-quiz","reveal-groups","email-results"];
   if(hostOnly.indexOf(action)!==-1 && !isHostController()) return;
   // Demo shortcuts can be used by unlocked Renzo host only.
   var demoActions = ["demo","demo-quiz"];
@@ -1604,15 +1622,54 @@ function handleAction(e){
 
   if(action==="email-results"){ sendSquadEmail(true); return; }
 
-  if(action==="reset"){
-    if(confirm("Restart the whole session for everyone?")){
-      sharedState = defaultState();
-      deviceState.myName = null;
-      myQuiz = { idx:0, answers:[], pillar:null };
-      saveShared(); saveDevice(); render();
-    }
+  if(action==="host-reset"){
+    /* Renzo can ALWAYS reset on demand from any screen (floating button + groups button),
+       gated by the host password - the password itself proves it's Renzo, so this works even
+       if this device never checked in, or the session is stuck on a stale retained phase. */
+    var pw = prompt("Renzo reset \u2013 enter the host password to restart the whole session for everyone:", "");
+    if(pw===null || pw.trim()==="") return;
+    verifyHostPassword(pw.trim()).then(function(ok){
+      if(!ok){ alert("Wrong password \u2013 the session was NOT reset."); return; }
+      doHostReset();
+    });
     return;
   }
+}
+
+/* ---------------- Renzo on-demand reset (password-gated) ---------------- */
+/* A floating, always-available reset for Renzo. It shows on every screen and every device,
+   but does nothing without the correct host password - so ONLY Renzo can actually restart
+   the session, on demand, at any time (handy to clear a stuck/stale retained state too). */
+function ensureHostResetButton(){
+  if(document.getElementById("hostResetBtn")) return;
+  var b = document.createElement("button");
+  b.id = "hostResetBtn";
+  b.type = "button";
+  b.setAttribute("data-action","host-reset");
+  b.textContent = "\u21BB Reset";
+  b.title = "Renzo: restart the whole session (host password required)";
+  b.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:9999;font-family:inherit;"+
+    "font-size:11px;font-weight:800;letter-spacing:.5px;padding:7px 12px;border-radius:999px;"+
+    "cursor:pointer;color:#ff6ab5;background:rgba(226,0,116,.12);"+
+    "border:1px solid rgba(226,0,116,.4);opacity:.65;transition:opacity .15s;";
+  b.onmouseenter = function(){ b.style.opacity = "1"; };
+  b.onmouseleave = function(){ b.style.opacity = ".65"; };
+  document.body.appendChild(b);
+}
+
+/* Full restart for everyone: clean local state AND overwrite the broker's retained message
+   (retain:true) so every current and future device drops back to a fresh check-in. */
+function doHostReset(){
+  sharedState = defaultState();
+  sharedState.updatedAt = Date.now();          // newer than any stale retained state
+  deviceState.myName = null;
+  deviceState.hostUnlocked = false;
+  myQuiz = { idx:0, answers:[], pillar:null };
+  myQuizNonce = 0;
+  saveMyQuiz();
+  saveShared();     // publishes with retain:true -> clears the stale retained state everywhere
+  saveDevice();
+  render();
 }
 
 /* ---------------- Sync ---------------- */
@@ -1630,12 +1687,31 @@ function pollShared(){
 loadDevice();
 loadShared();
 loadMyQuiz();
+
+/* ?reset=1 / ?fresh=1 : wipe this device AND flag the broker-retained state to be cleared
+   once MQTT connects. Handy while testing so a stale “Phase 2 in progress” never sticks. */
+RESET_ON_BOOT = /[?&](reset|fresh)=1/i.test(location.search);
+if(RESET_ON_BOOT){
+  try { localStorage.removeItem(SHARED_KEY); } catch(e){}
+  try { sessionStorage.removeItem(DEVICE_KEY); } catch(e){}
+  try { sessionStorage.removeItem(MYQUIZ_KEY); } catch(e){}
+  sharedState = defaultState();
+  sharedState.updatedAt = Date.now();          // newer than any retained testing state
+  deviceState = { myName:null, presentationDemo:false, hostUnlocked:false };
+  myQuiz = { idx:0, answers:[], pillar:null };
+  myQuizNonce = 0;
+  /* Strip the flag from the URL (keep ?room=...) so a later refresh doesn't wipe again. */
+  try { var _u=new URL(location.href); _u.searchParams.delete("reset"); _u.searchParams.delete("fresh");
+        history.replaceState(null,"", _u.pathname + (_u.search||"")); } catch(e){}
+}
+
 setSyncStatus("connecting");
 initRealtime();
 document.addEventListener("click", handleAction);
 window.addEventListener("storage", function(e){
   if(e && e.key===SHARED_KEY && e.newValue) applyIncomingSharedRaw(e.newValue);
 });
+ensureHostResetButton();   // Renzo's always-on, password-gated reset (every screen, every device)
 render();
 setInterval(pollShared, 500);
 </script>
