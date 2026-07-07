@@ -530,6 +530,16 @@ function publishRealtime(raw){
   } catch(e){}
 }
 
+/* True while THIS device is personally going through the Phase 2 quiz and hasn't submitted
+   yet. Answering is a PRIVATE, per-device activity that is intentionally kept OUT of the
+   streaming: incoming sync updates must not rebuild the quiz DOM underneath the user, or a
+   re-render can swallow their tap. Renzo & Oliver answer too (their answers just never count
+   toward the squads). */
+function busyAnswering(){
+  var me = deviceState.myName;
+  return sharedState.phase==="quiz" && !!me && !(sharedState.quiz && sharedState.quiz[me]);
+}
+
 /* Apply incoming shared state from any source (realtime, localStorage, or backend).
    Conflict handling:
    - Last-write-wins by updatedAt for host-driven fields (phase, order, etc.).
@@ -561,6 +571,9 @@ function applyIncomingSharedRaw(raw){
   }
 
   if(JSON.stringify(incoming) === JSON.stringify(sharedState)) return;
+  /* Snapshot BEFORE swapping in the new state: is this device mid-answering, and on what phase? */
+  var prevPhase = sharedState.phase;
+  var keepQuizStable = busyAnswering();
   sharedState = incoming;
   if(selfReadded){
     sharedState.updatedAt = Date.now();
@@ -569,6 +582,11 @@ function applyIncomingSharedRaw(raw){
     try { localStorage.setItem(SHARED_KEY, raw2); } catch(e){}
     publishRealtime(raw2);
   }
+  /* Streaming stays fully live for check-in, presentations, and the final squads. But while
+     I'm personally picking my Phase 2 answers, keep my selection screen perfectly still (the
+     answers merged above are still stored, so the host has everyone's data at reveal time).
+     A real phase change (e.g. the host revealing squads) always re-renders so I move on. */
+  if(keepQuizStable && sharedState.phase===prevPhase) return;
   render();
 }
 
@@ -1523,7 +1541,7 @@ function handleAction(e){
   }
 
   if(action==="demo-quiz"){
-    var players = presentPlayers();
+    var players = eligibleForGroups();   // never auto-fill Oliver/Renzo: they play for fun, answers ignored
     players.forEach(function(n){
       if(sharedState.quiz[n]) return;
       var a = QUIZ.map(function(){ return Math.floor(Math.random()*2); });
