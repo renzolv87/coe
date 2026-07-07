@@ -1095,7 +1095,20 @@ function handleAction(e){
     saveShared(); render(); return;
   }
 
-  if(action==="reset-device"){ deviceState.myName=null; deviceState.hostUnlocked=false; saveDevice(); render(); return; }
+  if(action==="reset-device"){
+    if(deviceState.myName){
+      var idxIn = sharedState.checkedIn.indexOf(deviceState.myName);
+      if(idxIn!==-1) sharedState.checkedIn.splice(idxIn,1);
+      var idxAbsent = sharedState.absent.indexOf(deviceState.myName);
+      if(idxAbsent!==-1) sharedState.absent.splice(idxAbsent,1);
+      saveShared();
+    }
+    deviceState.myName=null;
+    deviceState.hostUnlocked=false;
+    saveDevice();
+    render();
+    return;
+  }
 
   if(action==="start"){
     sharedState.order = buildOrder();
