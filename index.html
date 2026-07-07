@@ -730,9 +730,56 @@ function computeGroups(){
 
   function tzCount(name){ var t=tzOf(name); return all.filter(function(x){return tzOf(x)===t;}).length; }
 
-  /* Phase A: players who attended & answered -> affinity + timezone.
+  /* Phase 0 (Pillar draft): GUARANTEE that every squad gets at least one owner of
+     each pillar that has enough supply, BEFORE we optimise for affinity. A pillar
+     chosen by k people can reach min(k,3) squads; any shortfall is reported in the UI.
+     This is what makes "a minimum of one member per pillar" a real guarantee (when the
+     answers make it possible) instead of just a soft preference. */
+  var drafted = {};
+  (function draftPillars(){
+    var byPillar = {};
+    answered.forEach(function(name){
+      var p = sharedState.quiz[name].pillar;
+      if(typeof p !== "number") return;
+      (byPillar[p] = byPillar[p] || []).push(name);
+    });
+    /* Scarcest pillars first so rare specialists claim squads before capacity fills. */
+    var pillarIds = Object.keys(byPillar).map(Number).sort(function(a,b){
+      return byPillar[a].length - byPillar[b].length;
+    });
+    pillarIds.forEach(function(p, order){
+      var pool = byPillar[p].slice();
+      pool.sort(function(a,b){ return tzCount(a)-tzCount(b); }); // scarce-timezone picks first
+      /* Rotate the starting squad per pillar so single-supply pillars spread across squads. */
+      for(var step=0; step<3 && pool.length; step++){
+        var gi = (order + step) % 3;
+        if(pillarInGroup(groups[gi], p)) continue;      // squad already covers this pillar
+        if(groups[gi].length >= sizes[gi]) continue;    // squad already full
+        var anyCompatible=false, k;
+        for(k=0;k<pool.length;k++){
+          if(groups[gi].every(function(m){return tzCompatible(pool[k],m);})){ anyCompatible=true; break; }
+        }
+        var bestIdx=-1, bestScore=-1e9;
+        for(k=0;k<pool.length;k++){
+          var cand=pool[k];
+          var compatible = groups[gi].every(function(m){return tzCompatible(cand,m);});
+          if(anyCompatible && !compatible) continue;    // keep timezone feasible when possible
+          var sc=0; groups[gi].forEach(function(m){ sc += pairScore(cand,m); });
+          if(!compatible) sc -= 1000;
+          if(sc>bestScore){ bestScore=sc; bestIdx=k; }
+        }
+        if(bestIdx>=0){
+          groups[gi].push(pool[bestIdx]);
+          drafted[pool[bestIdx]] = true;
+          pool.splice(bestIdx,1);
+        }
+      }
+    });
+  })();
+
+  /* Phase A: remaining players who answered -> affinity + timezone.
      Rarest timezones first, so they claim compatible squads before the flexible ones. */
-  answered.slice().sort(function(a,b){
+  answered.slice().filter(function(x){ return !drafted[x]; }).sort(function(a,b){
     var ra=tzCount(a), rb=tzCount(b);
     if(ra!==rb) return ra-rb;
     if(tzOf(a)!==tzOf(b)) return tzOf(a)-tzOf(b);
@@ -751,15 +798,15 @@ function computeGroups(){
     return Object.keys(seen).length;
   }
   function cost(){
-    var hard=0, soft=0;
+    var hard=0, soft=0, cover=0;
     groups.forEach(function(gr){
       for(var i=0;i<gr.length;i++){ for(var j=i+1;j<gr.length;j++){
         if(!tzCompatible(gr[i],gr[j])) hard++;
         soft += pairScore(gr[i],gr[j]);
       } }
-      soft += 25 * distinctPillars(gr);   // strongly reward at least one owner per pillar
+      cover += distinctPillars(gr);        // total pillar coverage across squads
     });
-    return { hard:hard, soft:soft };
+    return { hard:hard, cover:cover, soft:soft };
   }
   var c = cost();
   for(var it=0; it<1500; it++){
@@ -768,7 +815,12 @@ function computeGroups(){
     var ai=Math.floor(Math.random()*groups[A].length), bi=Math.floor(Math.random()*groups[B].length);
     var tmp=groups[A][ai]; groups[A][ai]=groups[B][bi]; groups[B][bi]=tmp;
     var nc=cost();
-    var accept = (nc.hard < c.hard) || (nc.hard===c.hard && nc.soft > c.soft);
+    /* Priority: (1) fewer timezone clashes, (2) never lose pillar coverage, (3) better affinity.
+       Because coverage ranks above affinity, the optimiser can never undo the guaranteed
+       one-per-pillar spread produced by the draft. */
+    var accept = (nc.hard < c.hard)
+      || (nc.hard===c.hard && nc.cover > c.cover)
+      || (nc.hard===c.hard && nc.cover===c.cover && nc.soft > c.soft);
     if(accept){ c=nc; } else { var t2=groups[A][ai]; groups[A][ai]=groups[B][bi]; groups[B][bi]=t2; }
   }
 
@@ -1105,7 +1157,7 @@ function renderGroups(){
               '<span class="m-right">'+pillTag+'<span class="m-tz">'+tzShort(tzOf(n))+'</span></span></div>';
     });
     var missing = [];
-    PILLARS.forEach(function(p,i){ if(pillarCount[i]===0) missing.push(p); });
+    PILLARS.forEach(function(p,i){ if(pillarCount[i]===0) missing.push({p:p,i:i}); });
     var covered = PILLARS.length - missing.length;
     html += '<div class="pillar-split-label">This squad \u00B7 '+covered+'/'+PILLARS.length+' pillars covered</div>';
     html += '<div class="pillars">';
@@ -1115,9 +1167,17 @@ function renderGroups(){
               p.emoji+' '+p.tag+' <b>\u00D7'+c+'</b></span>';
     });
     html += '</div>';
-    html += (missing.length
-      ? '<div class="cover-note miss">\u26A0\uFE0F Missing '+missing.map(function(p){return p.tag;}).join(", ")+' \u2013 no one here picked it</div>'
-      : '<div class="cover-note ok">\u2705 Every pillar has at least one owner</div>');
+    if(!missing.length){
+      html += '<div class="cover-note ok">\u2705 Every pillar has at least one owner</div>';
+    } else {
+      /* Distinguish "nobody chose it" from "scarce pillar, owned by another squad". */
+      var noSupply = missing.filter(function(m){ return teamPillars[m.i]===0; }).map(function(m){ return m.p.tag; });
+      var elsewhere = missing.filter(function(m){ return teamPillars[m.i]>0; }).map(function(m){ return m.p.tag; });
+      var msg = [];
+      if(noSupply.length)  msg.push('\u26A0\uFE0F Missing '+noSupply.join(", ")+' \u2013 no one picked it');
+      if(elsewhere.length) msg.push('\u2139\uFE0F '+elsewhere.join(", ")+' \u2013 limited picks, covered in another squad');
+      html += '<div class="cover-note '+(noSupply.length?'miss':'ok')+'">'+msg.join('<br>')+'</div>';
+    }
     html += '</div>';
   });
   html += '</div>';
