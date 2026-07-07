@@ -1496,7 +1496,11 @@ function handleAction(e){
 
   if(action==="go-quiz"){
     sharedState.phase="quiz";
-    if(!sharedState.quiz) sharedState.quiz={};
+    /* Fresh Phase 2: wipe any answers/squads left over from a previous run or the
+       "Demo · fill all" shortcut, otherwise everyone shows up as "already answered"
+       and the questions never appear. Starting Phase 2 always deals a clean deck. */
+    sharedState.quiz = {};
+    sharedState.groups = [];
     myQuiz = { idx:0, answers:[], pillar:null };
     saveShared(); render(); return;
   }
