@@ -221,6 +221,12 @@
   .cover-note.miss { color:#f0c17a; background:rgba(245,165,36,.12); border:1px solid rgba(245,165,36,.35); }
   .pillar-hint { font-size:12px; color:#32B9AF; font-weight:700; text-align:center; margin-top:14px;
     background:rgba(50,185,175,.08); border:1px solid rgba(50,185,175,.25); border-radius:12px; padding:10px 12px; }
+  .footer-links { margin-top:34px; padding-bottom:8px; display:flex; gap:12px;
+    justify-content:center; flex-wrap:wrap; }
+  .footer-link-btn { text-decoration:none; display:inline-block; padding:12px 20px; border-radius:12px;
+    font-size:13px; font-weight:700; color:#e8ecf4; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.14); transition:all .15s; }
+  .footer-link-btn:hover { background:rgba(255,255,255,.12); transform:translateY(-2px); }
 </style>
 <!-- Realtime cross-device sync: MQTT over WebSockets (public broker + retained state) -->
 <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"
@@ -237,6 +243,10 @@
       <div class="bar-label" id="progressLabel"></div>
     </header>
     <div id="app"></div>
+    <div class="footer-links">
+      <a class="footer-link-btn" href="eas-coe-squads.html">eas coe squads kickoff result</a>
+      <a class="footer-link-btn" href="eas-coe-proposal.html">eas coe squads final proposal</a>
+    </div>
   </div>
 
 <script>
