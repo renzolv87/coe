@@ -4,6 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>EAS Automation CoE – Squads Final Proposal</title>
+  <style>
+    .spoc-modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.7); z-index:9999; align-items:center; justify-content:center; }
+    .spoc-modal.active { display:flex; }
+    .spoc-modal-content { background:#1c1c24; border-radius:12px; padding:24px; max-width:400px; width:90%; border:1px solid #33333f; }
+    .spoc-modal-content h2 { color:#fff; margin-bottom:16px; font-size:18px; }
+    .spoc-modal-input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #33333f; background:#0e0e12; color:#fff; margin-bottom:12px; font-size:14px; box-sizing:border-box; }
+    .spoc-modal-input::placeholder { color:#666; }
+    .spoc-modal-buttons { display:flex; gap:10px; justify-content:flex-end; }
+    .spoc-btn { padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:600; font-size:13px; }
+    .spoc-btn-ok { background:#E20074; color:#fff; }
+    .spoc-btn-ok:hover { background:#ff3d9a; }
+    .spoc-btn-cancel { background:#33333f; color:#e8ecf4; }
+    .spoc-btn-cancel:hover { background:#3f3f4b; }
+    .spoc-badge { font-size:10px; color:#32B9AF; border:1px solid #32B9AF66; background:#32B9AF1a; border-radius:8px; padding:2px 8px; margin-left:6px; cursor:pointer; display:inline-block; }
+    .spoc-badge:hover { border-color:#32B9AF; background:#32B9AF2a; }
+    .spoc-edit-btn { font-size:11px; color:#E20074; border:none; background:none; cursor:pointer; margin-left:8px; text-decoration:underline; }
+    .spoc-edit-btn:hover { color:#ff3d9a; }
+  </style>
 </head>
 <body style="margin:0;min-height:100%;background:#0e0e12">
   <div style="background:#0e0e12;padding:40px 16px;font-family:Arial,Helvetica,sans-serif">
@@ -43,6 +61,10 @@
                         <td style="font-size:19px;font-weight:800;color:#ffffff">Squad 1</td>
                         <td align="right"><span style="font-size:11px;font-weight:700;color:#9a9aa8;background:#20202a;border:1px solid #2e2e3a;border-radius:20px;padding:4px 11px">5 members</span></td>
                       </tr></table>
+                      <div style="margin-top:8px">
+                        <span id="spoc-badge-Squad-1" class="spoc-badge" style="display:none;"></span>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 1')">✎ SPOC</button>
+                      </div>
 
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
                         <td width="34" valign="middle" style="padding-right:10px"><img src="https://flagcdn.com/h40/sk.png" height="22" style="height:22px;width:auto;border-radius:3px" alt="Slovakia"></td>
@@ -98,6 +120,11 @@
                         <td align="right"><span style="font-size:11px;font-weight:700;color:#9a9aa8;background:#20202a;border:1px solid #2e2e3a;border-radius:20px;padding:4px 11px">5 members</span></td>
                       </tr></table>
 
+                      <div style="margin-top:8px">
+                        <span id="spoc-badge-Squad-2" class="spoc-badge" style="display:none;"></span>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 2')">✎ SPOC</button>
+                      </div>
+
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
                         <td width="34" valign="middle" style="padding-right:10px"><img src="https://flagcdn.com/h40/de.png" height="22" style="height:22px;width:auto;border-radius:3px" alt="Germany"></td>
                         <td valign="middle" style="color:#ffffff;font-size:15px;font-weight:600;padding:6px 0">Mark<div style="font-size:11px;color:#8a8a99;font-weight:400;margin-top:2px">Germany</div></td>
@@ -152,6 +179,11 @@
                         <td align="right"><span style="font-size:11px;font-weight:700;color:#9a9aa8;background:#20202a;border:1px solid #2e2e3a;border-radius:20px;padding:4px 11px">5 members</span></td>
                       </tr></table>
 
+                      <div style="margin-top:8px">
+                        <span id="spoc-badge-Squad-3" class="spoc-badge" style="display:none;"></span>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 3')">✎ SPOC</button>
+                      </div>
+
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
                         <td width="34" valign="middle" style="padding-right:10px"><img src="https://flagcdn.com/h40/in.png" height="22" style="height:22px;width:auto;border-radius:3px" alt="India"></td>
                         <td valign="middle" style="color:#ffffff;font-size:15px;font-weight:600;padding:6px 0">Pankaj<div style="font-size:11px;color:#8a8a99;font-weight:400;margin-top:2px">India</div></td>
@@ -198,6 +230,22 @@
                 </tr></table>
                 <!-- /Squads horizontal wrapper -->
 
+                <!-- SPOC Management Modal -->
+                <div id="spocModal" class="spoc-modal">
+                  <div class="spoc-modal-content">
+                    <h2>Cambiar SPOC</h2>
+                    <input type="password" id="spocPassword" class="spoc-modal-input" placeholder="Ingresa contraseña" autocomplete="off">
+                    <div id="spocMemberSelect" style="display:none; margin-bottom:12px; max-height:300px; overflow-y:auto;">
+                      <!-- Se completará con miembros del squad -->
+                    </div>
+                    <div id="spocError" style="color:#f5a524; font-size:12px; margin-bottom:12px; display:none;"></div>
+                    <div class="spoc-modal-buttons">
+                      <button class="spoc-btn spoc-btn-cancel" onclick="closeSPOCModal()">Cancelar</button>
+                      <button class="spoc-btn spoc-btn-ok" onclick="confirmSPOC()">Confirmar</button>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Footer -->
                 <div style="text-align:center;color:#55555f;font-size:11px;margin-top:26px">
                   Generated automatically by the EAS CoE Kickoff app
@@ -215,5 +263,174 @@
       </tr>
     </table>
   </div>
-</body>
-</html>
+
+<script>
+  /* SPOC Management with encrypted authentication */
+  var SPOC_HASH = "7e979be3111c5bc766a675a94e9369a4dbe46c3c30a46c4fe7cf25a77bb1e1f8";
+  var SPOC_STORAGE_KEY = "eas_coe_spoc_data_v1";
+  var currentSpocSquad = null;
+  var currentSpocMembers = [];
+
+  var SQUADS = [
+    {
+      name: "Squad 1",
+      members: ["Martin", "Krisztian", "Adolfo", "Caio", "Bruno"]
+    },
+    {
+      name: "Squad 2",
+      members: ["Mark", "Istvan", "Balaji", "Balazs", "Srikanth"]
+    },
+    {
+      name: "Squad 3",
+      members: ["Pankaj", "Prithviraj", "Gabor", "Nandor", "Thomas"]
+    }
+  ];
+
+  function getSPOCData() {
+    try {
+      var data = localStorage.getItem(SPOC_STORAGE_KEY);
+      return data ? JSON.parse(data) : {};
+    } catch(e) {
+      return {};
+    }
+  }
+
+  function saveSPOCData(data) {
+    try {
+      localStorage.setItem(SPOC_STORAGE_KEY, JSON.stringify(data));
+    } catch(e) {}
+  }
+
+  function getSPOCForSquad(squadName) {
+    var data = getSPOCData();
+    return data[squadName] || null;
+  }
+
+  function setSPOCForSquad(squadName, memberName) {
+    var data = getSPOCData();
+    data[squadName] = {
+      name: memberName,
+      month: new Date().toISOString().slice(0, 7),
+      timestamp: new Date().getTime()
+    };
+    saveSPOCData(data);
+    renderSPOCBadges();
+  }
+
+  function verifySpocPassword(entered) {
+    return new Promise(function(resolve) {
+      try {
+        var msgBuffer = new TextEncoder().encode(entered);
+        crypto.subtle.digest("SHA-256", msgBuffer).then(function(hashBuffer) {
+          var hashArray = Array.from(new Uint8Array(hashBuffer));
+          var hashHex = hashArray.map(function(b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+          resolve(hashHex === SPOC_HASH);
+        });
+      } catch(e) {
+        resolve(false);
+      }
+    });
+  }
+
+  function openSPOCModal(squadName) {
+    currentSpocSquad = squadName;
+    var squad = SQUADS.find(function(s) { return s.name === squadName; });
+    if (!squad) return;
+
+    currentSpocMembers = squad.members;
+    var modal = document.getElementById("spocModal");
+    var select = document.getElementById("spocMemberSelect");
+    var password = document.getElementById("spocPassword");
+    var error = document.getElementById("spocError");
+
+    password.value = "";
+    error.style.display = "none";
+    select.style.display = "none";
+    select.innerHTML = "";
+
+    modal.classList.add("active");
+    password.focus();
+
+    password.addEventListener("keyup", onPasswordChange);
+  }
+
+  function onPasswordChange() {
+    var password = document.getElementById("spocPassword").value;
+    if (password.length < 3) return;
+
+    verifySpocPassword(password).then(function(isValid) {
+      var select = document.getElementById("spocMemberSelect");
+      var error = document.getElementById("spocError");
+
+      if (isValid) {
+        error.style.display = "none";
+        select.style.display = "block";
+        populateMemberSelect();
+      } else {
+        error.style.display = "block";
+        error.textContent = "Contraseña incorrecta";
+        select.style.display = "none";
+      }
+    });
+  }
+
+  function populateMemberSelect() {
+    var select = document.getElementById("spocMemberSelect");
+    select.innerHTML = "";
+
+    currentSpocMembers.forEach(function(member) {
+      var div = document.createElement("div");
+      div.style.cssText = "padding:8px 12px; border-radius:8px; cursor:pointer; background:#1a1f2a; margin-bottom:4px; color:#e8ecf4; border:1px solid #33333f; transition:all .15s;";
+      div.textContent = member;
+      div.onmouseover = function() { this.style.background = "#242934"; this.style.borderColor = "#E20074"; };
+      div.onmouseout = function() { this.style.background = "#1a1f2a"; this.style.borderColor = "#33333f"; };
+      div.onclick = function() { selectMember(member); };
+      select.appendChild(div);
+    });
+  }
+
+  function selectMember(memberName) {
+    setSPOCForSquad(currentSpocSquad, memberName);
+    closeSPOCModal();
+  }
+
+  function confirmSPOC() {
+    var select = document.getElementById("spocMemberSelect");
+    if (select.style.display === "block") {
+      alert("Selecciona un miembro para establecer como SPOC");
+    }
+  }
+
+  function closeSPOCModal() {
+    document.getElementById("spocModal").classList.remove("active");
+    document.getElementById("spocPassword").removeEventListener("keyup", onPasswordChange);
+  }
+
+  function renderSPOCBadges() {
+    SQUADS.forEach(function(squad) {
+      var spoc = getSPOCForSquad(squad.name);
+      var badgeId = "spoc-badge-" + squad.name.replace(/ /g, "-");
+      var badge = document.getElementById(badgeId);
+
+      if (badge) {
+        if (spoc) {
+          badge.textContent = "👤 SPOC: " + spoc.name;
+          badge.style.display = "inline-block";
+        } else {
+          badge.style.display = "none";
+        }
+      }
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function() {
+    renderSPOCBadges();
+
+    document.addEventListener("click", function(e) {
+      var modal = document.getElementById("spocModal");
+      if (e.target === modal) {
+        closeSPOCModal();
+      }
+    });
+  });
+</script>
