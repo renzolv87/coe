@@ -19,8 +19,11 @@
     .spoc-btn-cancel:hover { background:#3f3f4b; }
     .spoc-badge { font-size:10px; color:#32B9AF; border:1px solid #32B9AF66; background:#32B9AF1a; border-radius:8px; padding:2px 8px; margin-left:6px; cursor:pointer; display:inline-block; }
     .spoc-badge:hover { border-color:#32B9AF; background:#32B9AF2a; }
-    .spoc-edit-btn { font-size:11px; color:#E20074; border:none; background:none; cursor:pointer; margin-left:8px; text-decoration:underline; }
-    .spoc-edit-btn:hover { color:#ff3d9a; }
+    .spoc-edit-btn { font-size:10px; font-weight:600; color:#9a9aa8; border:none; background:transparent; cursor:pointer; margin-left:0; margin-top:8px; padding:2px 4px; border-radius:4px; display:inline-flex; align-items:center; gap:0; transition:all .2s; box-shadow:none; }
+    .spoc-edit-btn:hover { color:#ffffff; background:#ffffff14; transform:none; box-shadow:none; }
+    .spoc-edit-btn:active { background:#ffffff1f; }
+    .spoc-rotation-icon { font-size:10px; display:inline-block; animation:spin 3s linear infinite; }
+    @keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
   </style>
 </head>
 <body style="margin:0;min-height:100%;background:#0e0e12">
@@ -63,7 +66,7 @@
                       </tr></table>
                       <div style="margin-top:8px">
                         <span id="spoc-badge-Squad-1" class="spoc-badge" style="display:none;"></span>
-                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 1')">✎ SPOC</button>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 1')"><span class="spoc-rotation-icon">↻</span></button>
                       </div>
 
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
@@ -122,7 +125,7 @@
 
                       <div style="margin-top:8px">
                         <span id="spoc-badge-Squad-2" class="spoc-badge" style="display:none;"></span>
-                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 2')">✎ SPOC</button>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 2')"><span class="spoc-rotation-icon">↻</span></button>
                       </div>
 
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
@@ -181,7 +184,7 @@
 
                       <div style="margin-top:8px">
                         <span id="spoc-badge-Squad-3" class="spoc-badge" style="display:none;"></span>
-                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 3')">✎ SPOC</button>
+                        <button class="spoc-edit-btn" onclick="openSPOCModal('Squad 3')"><span class="spoc-rotation-icon">↻</span></button>
                       </div>
 
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr>
@@ -233,15 +236,15 @@
                 <!-- SPOC Management Modal -->
                 <div id="spocModal" class="spoc-modal">
                   <div class="spoc-modal-content">
-                    <h2>Cambiar SPOC</h2>
-                    <input type="password" id="spocPassword" class="spoc-modal-input" placeholder="Ingresa contraseña" autocomplete="off">
+                    <h2>Change SPOC</h2>
+                    <input type="password" id="spocPassword" class="spoc-modal-input" placeholder="Enter password" autocomplete="off">
                     <div id="spocMemberSelect" style="display:none; margin-bottom:12px; max-height:300px; overflow-y:auto;">
-                      <!-- Se completará con miembros del squad -->
+                      <!-- Will be populated with squad members -->
                     </div>
                     <div id="spocError" style="color:#f5a524; font-size:12px; margin-bottom:12px; display:none;"></div>
                     <div class="spoc-modal-buttons">
-                      <button class="spoc-btn spoc-btn-cancel" onclick="closeSPOCModal()">Cancelar</button>
-                      <button class="spoc-btn spoc-btn-ok" onclick="confirmSPOC()">Confirmar</button>
+                      <button class="spoc-btn spoc-btn-cancel" onclick="closeSPOCModal()">Cancel</button>
+                      <button class="spoc-btn spoc-btn-ok" onclick="confirmSPOC()">Confirm</button>
                     </div>
                   </div>
                 </div>
